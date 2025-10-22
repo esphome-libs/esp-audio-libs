@@ -35,4 +35,3 @@ jobs:
           components: |
             esp-audio-libs: .
           namespace: esphome
-          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
