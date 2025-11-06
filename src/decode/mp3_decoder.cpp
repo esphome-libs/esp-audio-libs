@@ -1719,9 +1719,9 @@ static void UnpackSFMPEG2(BitStreamInfo *bsi, SideInfoSub *sis, ScaleFactorInfoS
  * Return:      length (in bytes) of scale factor data, -1 if null input
  *pointers
  **************************************************************************************/
-int UnpackScaleFactors(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffset, int bitsAvail, int gr, int ch) {
+int UnpackScaleFactors(MP3DecInfo *mp3DecInfo, const unsigned char *buf, int *bitOffset, int bitsAvail, int gr, int ch) {
   int bitsUsed;
-  unsigned char *startBuf;
+  const unsigned char *startBuf;
   BitStreamInfo bitStreamInfo, *bsi;
   FrameHeader *fh;
   SideInfo *si;
@@ -7119,7 +7119,7 @@ const int quadTabMaxBits[2] = {6, 4};
  *not necessarily all linBits outputs for x,y > 15)
  **************************************************************************************/
 // no improvement with section=data
-static int DecodeHuffmanPairs(int *xy, int nVals, int tabIdx, int bitsLeft, unsigned char *buf, int bitOffset) {
+static int DecodeHuffmanPairs(int *xy, int nVals, int tabIdx, int bitsLeft, const unsigned char *buf, int bitOffset) {
   int i, x, y;
   int cachedBits, padBits, len, startBits, linBits, maxBits, minBits;
   HuffTabType tabType;
@@ -7351,7 +7351,7 @@ static int DecodeHuffmanPairs(int *xy, int nVals, int tabIdx, int bitsLeft, unsi
  * Notes:        si_huff.bit tests every vwxy output in both quad tables
  **************************************************************************************/
 // no improvement with section=data
-static int DecodeHuffmanQuads(int *vwxy, int nVals, int tabIdx, int bitsLeft, unsigned char *buf, int bitOffset) {
+static int DecodeHuffmanQuads(int *vwxy, int nVals, int tabIdx, int bitsLeft, const unsigned char *buf, int bitOffset) {
   int i, v, w, x, y;
   int len, maxBits, cachedBits, padBits;
   unsigned int cache;
@@ -7467,10 +7467,10 @@ static int DecodeHuffmanQuads(int *vwxy, int nVals, int tabIdx, int bitsLeft, un
  *                out of bits prematurely (invalid bitstream)
  **************************************************************************************/
 // .data about 1ms faster per frame
-int DecodeHuffman(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffset, int huffBlockBits, int gr, int ch) {
+int DecodeHuffman(MP3DecInfo *mp3DecInfo, const unsigned char *buf, int *bitOffset, int huffBlockBits, int gr, int ch) {
   int r1Start, r2Start, rEnd[4]; /* region boundaries */
   int i, w, bitsUsed, bitsLeft;
-  unsigned char *startBuf = buf;
+  const unsigned char *startBuf = buf;
 
   FrameHeader *fh;
   SideInfo *si;
@@ -8145,7 +8145,7 @@ void FreeBuffers(MP3DecInfo *mp3DecInfo) {
  *
  * Return:      none
  **************************************************************************************/
-void SetBitstreamPointer(BitStreamInfo *bsi, int nBytes, unsigned char *buf) {
+void SetBitstreamPointer(BitStreamInfo *bsi, int nBytes, const unsigned char *buf) {
   /* init bitstream */
   bsi->bytePtr = buf;
   bsi->iCache = 0;     /* 4-byte unsigned int */
@@ -8249,7 +8249,7 @@ unsigned int GetBits(BitStreamInfo *bsi, int nBits) {
  * Return:      number of bits read from bitstream, as offset from
  *startBuf:startOffset
  **************************************************************************************/
-int CalcBitsUsed(BitStreamInfo *bsi, unsigned char *startBuf, int startOffset) {
+int CalcBitsUsed(BitStreamInfo *bsi, const unsigned char *startBuf, int startOffset) {
   int bitsUsed;
 
   bitsUsed = (bsi->bytePtr - startBuf) * 8;
@@ -8301,7 +8301,7 @@ int CheckPadBit(MP3DecInfo *mp3DecInfo) {
  * TODO:        check for valid modes, depending on capabilities of decoder
  *              test CRC on actual stream (verify no endian problems)
  **************************************************************************************/
-int UnpackFrameHeader(MP3DecInfo *mp3DecInfo, unsigned char *buf) {
+int UnpackFrameHeader(MP3DecInfo *mp3DecInfo, const unsigned char *buf) {
   int verIdx;
   FrameHeader *fh;
 
@@ -8386,7 +8386,7 @@ int UnpackFrameHeader(MP3DecInfo *mp3DecInfo, unsigned char *buf) {
  * Return:      length (in bytes) of side info data
  *              -1 if null input pointers
  **************************************************************************************/
-int UnpackSideInfo(MP3DecInfo *mp3DecInfo, unsigned char *buf) {
+int UnpackSideInfo(MP3DecInfo *mp3DecInfo, const unsigned char *buf) {
   int gr, ch, bd, nBytes;
   BitStreamInfo bitStreamInfo, *bsi;
   FrameHeader *fh;
@@ -8530,7 +8530,7 @@ void MP3FreeDecoder(HMP3Decoder hMP3Decoder) {
  * Return:      offset to first sync word (bytes from start of buf)
  *              -1 if sync not found after searching nBytes
  **************************************************************************************/
-int MP3FindSyncWord(unsigned char *buf, int nBytes) {
+int MP3FindSyncWord(const unsigned char *buf, int nBytes) {
   int i;
 
   /* find byte-aligned syncword - need 12 (MPEG 1,2) or 11 (MPEG 2.5) matching
@@ -8567,9 +8567,9 @@ int MP3FindSyncWord(unsigned char *buf, int nBytes) {
  *function once (first frame) then store the result (nSlots) and just use it
  *from then on
  **************************************************************************************/
-static int MP3FindFreeSync(unsigned char *buf, unsigned char firstFH[4], int nBytes) {
+static int MP3FindFreeSync(const unsigned char *buf, const unsigned char firstFH[4], int nBytes) {
   int offset = 0;
-  unsigned char *bufPtr = buf;
+  const unsigned char *bufPtr = buf;
 
   /* loop until we either:
    *  - run out of nBytes (FindMP3SyncWord() returns -1)
@@ -8648,7 +8648,7 @@ void MP3GetLastFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo) {
  * Return:      error code, defined in mp3dec.h (0 means no error, < 0 means
  *error)
  **************************************************************************************/
-int MP3GetNextFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo, unsigned char *buf) {
+int MP3GetNextFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo, const unsigned char *buf) {
   MP3DecInfo *mp3DecInfo = (MP3DecInfo *) hMP3Decoder;
 
   if (!mp3DecInfo)
@@ -8707,10 +8707,10 @@ static void MP3ClearBadFrame(MP3DecInfo *mp3DecInfo, short *outbuf) {
  *                is not supported (bit reservoir is not maintained if useSize
  *on)
  **************************************************************************************/
-int MP3Decode(HMP3Decoder hMP3Decoder, unsigned char **inbuf, int *bytesLeft, short *outbuf, int useSize) {
+int MP3Decode(HMP3Decoder hMP3Decoder, const unsigned char **inbuf, int *bytesLeft, short *outbuf, int useSize) {
   int offset, bitOffset, mainBits, gr, ch, fhBytes, siBytes, freeFrameBytes;
   int prevBitOffset, sfBlockBits, huffBlockBits;
-  unsigned char *mainPtr;
+  const unsigned char *mainPtr;
   MP3DecInfo *mp3DecInfo = (MP3DecInfo *) hMP3Decoder;
 
   if (!mp3DecInfo)

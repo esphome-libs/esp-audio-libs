@@ -131,7 +131,7 @@ typedef struct _SFBandTable {
 } SFBandTable;
 
 typedef struct _BitStreamInfo {
-  unsigned char *bytePtr;
+  const unsigned char *bytePtr;
   unsigned int iCache;
   int cachedBits;
   int nBytes;
@@ -262,9 +262,9 @@ typedef struct _SubbandInfo {
 } SubbandInfo;
 
 /* bitstream.c */
-void SetBitstreamPointer(BitStreamInfo *bsi, int nBytes, unsigned char *buf);
+void SetBitstreamPointer(BitStreamInfo *bsi, int nBytes, const unsigned char *buf);
 unsigned int GetBits(BitStreamInfo *bsi, int nBits);
-int CalcBitsUsed(BitStreamInfo *bsi, unsigned char *startBuf, int startOffset);
+int CalcBitsUsed(BitStreamInfo *bsi, const unsigned char *startBuf, int startOffset);
 
 /* dequant.c, dqchan.c, stproc.c */
 int DequantChannel(int *sampleBuf, int *workBuf, int *nonZeroBound, FrameHeader *fh, SideInfoSub *sis,
@@ -338,12 +338,12 @@ typedef struct _MP3DecInfo {
 MP3DecInfo *AllocateBuffers(void);
 void FreeBuffers(MP3DecInfo *mp3DecInfo);
 int CheckPadBit(MP3DecInfo *mp3DecInfo);
-int UnpackFrameHeader(MP3DecInfo *mp3DecInfo, unsigned char *buf);
-int UnpackSideInfo(MP3DecInfo *mp3DecInfo, unsigned char *buf);
-int DecodeHuffman(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffset, int huffBlockBits, int gr, int ch);
+int UnpackFrameHeader(MP3DecInfo *mp3DecInfo, const unsigned char *buf);
+int UnpackSideInfo(MP3DecInfo *mp3DecInfo, const unsigned char *buf);
+int DecodeHuffman(MP3DecInfo *mp3DecInfo, const unsigned char *buf, int *bitOffset, int huffBlockBits, int gr, int ch);
 int Dequantize(MP3DecInfo *mp3DecInfo, int gr);
 int IMDCT(MP3DecInfo *mp3DecInfo, int gr, int ch);
-int UnpackScaleFactors(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffset, int bitsAvail, int gr, int ch);
+int UnpackScaleFactors(MP3DecInfo *mp3DecInfo, const unsigned char *buf, int *bitOffset, int bitsAvail, int gr, int ch);
 int Subband(MP3DecInfo *mp3DecInfo, short *pcmBuf);
 
 extern const int samplerateTab[3][3];
@@ -387,11 +387,11 @@ typedef struct _MP3FrameInfo {
 /* public API */
 HMP3Decoder MP3InitDecoder(void);
 void MP3FreeDecoder(HMP3Decoder hMP3Decoder);
-int MP3Decode(HMP3Decoder hMP3Decoder, unsigned char **inbuf, int *bytesLeft, short *outbuf, int useSize);
+int MP3Decode(HMP3Decoder hMP3Decoder, const unsigned char **inbuf, int *bytesLeft, short *outbuf, int useSize);
 
 void MP3GetLastFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo);
-int MP3GetNextFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo, unsigned char *buf);
-int MP3FindSyncWord(unsigned char *buf, int nBytes);
+int MP3GetNextFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo, const unsigned char *buf);
+int MP3FindSyncWord(const unsigned char *buf, int nBytes);
 
 }  // namespace helix_decoder
 }  // namespace esp_audio_libs
