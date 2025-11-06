@@ -1,10 +1,11 @@
 #include "wav_decoder.h"
 #include <cstdint>
+#include <cstring>
 
 namespace esp_audio_libs {
 namespace wav_decoder {
 
-WAVDecoderResult WAVDecoder::decode_header(uint8_t *buffer, size_t bytes_available) {
+WAVDecoderResult WAVDecoder::decode_header(const uint8_t *buffer, size_t bytes_available) {
   size_t bytes_to_skip = this->bytes_to_skip();
   size_t bytes_to_read = this->bytes_needed();
   this->bytes_processed_ = 0;
@@ -44,7 +45,7 @@ WAVDecoderResult WAVDecoder::decode_header(uint8_t *buffer, size_t bytes_availab
   return WAV_DECODER_ERROR_FAILED;
 }
 
-WAVDecoderResult WAVDecoder::next(uint8_t *buffer) {
+WAVDecoderResult WAVDecoder::next(const uint8_t *buffer) {
   this->bytes_to_skip_ = 0;
 
   switch (this->state_) {
@@ -54,7 +55,7 @@ WAVDecoderResult WAVDecoder::next(uint8_t *buffer) {
         return WAV_DECODER_ERROR_NO_RIFF;
       }
 
-      this->chunk_bytes_left_ = *((uint32_t *) (buffer + 4));
+      std::memcpy(&this->chunk_bytes_left_, buffer + 4, sizeof(uint32_t));
       if ((this->chunk_bytes_left_ % 2) != 0) {
         // Pad byte
         this->chunk_bytes_left_++;
@@ -80,7 +81,7 @@ WAVDecoderResult WAVDecoder::next(uint8_t *buffer) {
 
     case WAV_DECODER_BEFORE_FMT: {
       this->chunk_name_ = std::string((const char *) buffer, 4);
-      this->chunk_bytes_left_ = *((uint32_t *) (buffer + 4));
+      std::memcpy(&this->chunk_bytes_left_, buffer + 4, sizeof(uint32_t));
       if ((this->chunk_bytes_left_ % 2) != 0) {
         // Pad byte
         this->chunk_bytes_left_++;
@@ -108,9 +109,9 @@ WAVDecoderResult WAVDecoder::next(uint8_t *buffer) {
        * bits per sample (uint16_t)
        * [rest of format chunk]
        */
-      this->num_channels_ = *((uint16_t *) (buffer + 2));
-      this->sample_rate_ = *((uint32_t *) (buffer + 4));
-      this->bits_per_sample_ = *((uint16_t *) (buffer + 14));
+      std::memcpy(&this->num_channels_, buffer + 2, sizeof(uint16_t));
+      std::memcpy(&this->sample_rate_, buffer + 4, sizeof(uint32_t));
+      std::memcpy(&this->bits_per_sample_, buffer + 14, sizeof(uint16_t));
 
       // Next chunk
       this->state_ = WAV_DECODER_BEFORE_DATA;
@@ -120,7 +121,7 @@ WAVDecoderResult WAVDecoder::next(uint8_t *buffer) {
 
     case WAV_DECODER_BEFORE_DATA: {
       this->chunk_name_ = std::string((const char *) buffer, 4);
-      this->chunk_bytes_left_ = *((uint32_t *) (buffer + 4));
+      std::memcpy(&this->chunk_bytes_left_, buffer + 4, sizeof(uint32_t));
       if ((this->chunk_bytes_left_ % 2) != 0) {
         // Pad byte
         this->chunk_bytes_left_++;

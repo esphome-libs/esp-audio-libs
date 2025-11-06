@@ -65,7 +65,7 @@ class WAVDecoder {
   uint16_t num_channels() { return this->num_channels_; }
   uint16_t bits_per_sample() { return this->bits_per_sample_; }
 
-  WAVDecoderResult decode_header(uint8_t *buffer, size_t bytes_available);
+  WAVDecoderResult decode_header(const uint8_t *buffer, size_t bytes_available);
 
   // Advance decoding:
   // 1. Check bytes_to_skip() first, and skip that many bytes.
@@ -73,7 +73,7 @@ class WAVDecoder {
   // 3. Run next() and loop to 1 until the result is
   // WAV_DECODER_SUCCESS_IN_DATA.
   // 4. Use chunk_bytes_left() to read the data samples.
-  WAVDecoderResult next(uint8_t *buffer);
+  WAVDecoderResult next(const uint8_t *buffer);
 
   void reset();
 
