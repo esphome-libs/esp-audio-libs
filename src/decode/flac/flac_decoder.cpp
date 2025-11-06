@@ -32,7 +32,7 @@ static const std::vector<int32_t> FIXED_COEFFICIENTS[] = {{}, {1}, {-1, 2}, {1, 
 // Header Parsing
 // ============================================================================
 
-FLACDecoderResult FLACDecoder::read_header(uint8_t *buffer, size_t buffer_length) {
+FLACDecoderResult FLACDecoder::read_header(const uint8_t *buffer, size_t buffer_length) {
   this->buffer_ = buffer;
   this->buffer_index_ = 0;
   this->bytes_left_ = buffer_length;
@@ -182,7 +182,7 @@ FLACDecoderResult FLACDecoder::read_header(uint8_t *buffer, size_t buffer_length
 // Force O3 optimization for decode_frame (performance critical)
 // This ensures PlatformIO builds also get optimal performance
 FLAC_OPTIMIZE_O3
-FLACDecoderResult FLACDecoder::decode_frame(uint8_t *buffer, size_t buffer_length, uint8_t *output_buffer,
+FLACDecoderResult FLACDecoder::decode_frame(const uint8_t *buffer, size_t buffer_length, uint8_t *output_buffer,
                                             uint32_t *num_samples) {
   this->buffer_ = buffer;
   this->buffer_index_ = 0;
@@ -955,7 +955,8 @@ void FLACDecoder::align_to_byte() {
 
 inline bool FLACDecoder::refill_bit_buffer() {
   if (this->bytes_left_ >= 4) {
-    const uint32_t new_word = *reinterpret_cast<uint32_t *>(&this->buffer_[this->buffer_index_]);
+    uint32_t new_word;
+    std::memcpy(&new_word, &this->buffer_[this->buffer_index_], sizeof(uint32_t));
     this->bit_buffer_ = __builtin_bswap32(new_word);
     this->bit_buffer_length_ = 32;
     this->buffer_index_ += 4;

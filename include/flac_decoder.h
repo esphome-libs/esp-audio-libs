@@ -209,7 +209,7 @@ class FLACDecoder {
   /// @return FLAC_DECODER_SUCCESS when header is complete
   ///         FLAC_DECODER_HEADER_OUT_OF_DATA when more data is needed (streaming)
   ///         Error code on failure
-  FLACDecoderResult read_header(uint8_t *buffer, size_t buffer_length);
+  FLACDecoderResult read_header(const uint8_t *buffer, size_t buffer_length);
 
   /// @brief Decode a single FLAC frame into PCM samples
   ///
@@ -223,7 +223,7 @@ class FLACDecoder {
   /// @return FLAC_DECODER_SUCCESS on success
   ///         FLAC_DECODER_NO_MORE_FRAMES when end of stream reached
   ///         Error code on failure
-  FLACDecoderResult decode_frame(uint8_t *buffer, size_t buffer_length, uint8_t *output_buffer, uint32_t *num_samples);
+  FLACDecoderResult decode_frame(const uint8_t *buffer, size_t buffer_length, uint8_t *output_buffer, uint32_t *num_samples);
 
   // ========================================
   // Stream Information Getters
@@ -409,7 +409,7 @@ class FLACDecoder {
   // ========================================
   // Input Buffer State
   // ========================================
-  uint8_t *buffer_ = nullptr;          // Pointer to current input buffer
+  const uint8_t *buffer_ = nullptr;    // Pointer to current input buffer
   std::size_t buffer_index_ = 0;       // Current position in input buffer
   std::size_t bytes_left_ = 0;         // Bytes remaining in input buffer
   std::size_t frame_start_index_ = 0;  // Start position of current frame (for CRC)
