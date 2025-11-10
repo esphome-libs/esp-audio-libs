@@ -21,8 +21,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
 
       - name: Update version files
         run: |
