@@ -26,6 +26,8 @@ jobs:
     name: Publish to Espressif
     runs-on: ubuntu-latest
     environment: espressif
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Publish package
