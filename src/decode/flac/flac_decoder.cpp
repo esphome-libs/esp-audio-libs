@@ -241,22 +241,36 @@ FLACDecoderResult FLACDecoder::decode_frame(const uint8_t *buffer, size_t buffer
     }
   }
 
-  uint32_t bytes_per_sample = (this->curr_frame_sample_depth_ + 7) / 8;
-  uint32_t shift_amount = 0;
-  if (this->curr_frame_sample_depth_ % 8 != 0) {
-    shift_amount = 8 - (this->curr_frame_sample_depth_ % 8);
-  }
-
   // Write decoded samples to output buffer using optimized fast paths
-  if (this->curr_frame_sample_depth_ == 16 && shift_amount == 0 && this->num_channels_ == 2) {
-    this->write_samples_16bit_stereo(output_buffer, this->curr_frame_block_size_);
-  } else if (this->curr_frame_sample_depth_ == 16 && shift_amount == 0 && this->num_channels_ == 1) {
-    this->write_samples_16bit_mono(output_buffer, this->curr_frame_block_size_);
-  } else if (this->curr_frame_sample_depth_ == 24 && shift_amount == 0 && this->num_channels_ == 2) {
-    this->write_samples_24bit_stereo(output_buffer, this->curr_frame_block_size_);
+  if (this->output_32bit_samples_) {
+    // 32-bit output mode: all samples output as 4 bytes, left-justified (MSB-aligned)
+    uint32_t shift_amount = 32 - this->curr_frame_sample_depth_;
+
+    if (this->num_channels_ == 2) {
+      this->write_samples_32bit_stereo(output_buffer, this->curr_frame_block_size_, shift_amount);
+    } else if (this->num_channels_ == 1) {
+      this->write_samples_32bit_mono(output_buffer, this->curr_frame_block_size_, shift_amount);
+    } else {
+      this->write_samples_32bit_general(output_buffer, this->curr_frame_block_size_, shift_amount);
+    }
   } else {
-    this->write_samples_general(output_buffer, this->curr_frame_block_size_, bytes_per_sample, shift_amount,
-                                this->curr_frame_sample_depth_);
+    // Native output mode: pack to nearest byte boundary
+    uint32_t bytes_per_sample = (this->curr_frame_sample_depth_ + 7) / 8;
+    uint32_t shift_amount = 0;
+    if (this->curr_frame_sample_depth_ % 8 != 0) {
+      shift_amount = 8 - (this->curr_frame_sample_depth_ % 8);
+    }
+
+    if (this->curr_frame_sample_depth_ == 16 && shift_amount == 0 && this->num_channels_ == 2) {
+      this->write_samples_16bit_stereo(output_buffer, this->curr_frame_block_size_);
+    } else if (this->curr_frame_sample_depth_ == 16 && shift_amount == 0 && this->num_channels_ == 1) {
+      this->write_samples_16bit_mono(output_buffer, this->curr_frame_block_size_);
+    } else if (this->curr_frame_sample_depth_ == 24 && shift_amount == 0 && this->num_channels_ == 2) {
+      this->write_samples_24bit_stereo(output_buffer, this->curr_frame_block_size_);
+    } else {
+      this->write_samples_general(output_buffer, this->curr_frame_block_size_, bytes_per_sample, shift_amount,
+                                  this->curr_frame_sample_depth_);
+    }
   }
 
   this->reset_bit_buffer();
@@ -376,6 +390,40 @@ void FLACDecoder::write_samples_general(uint8_t *output_buffer, uint32_t block_s
       for (uint32_t byte = 0; byte < bytes_per_sample; byte++) {
         output_buffer[output_index++] = (sample >> (byte * 8)) & 0xFF;
       }
+    }
+  }
+}
+
+FLAC_OPTIMIZE_O3
+void FLACDecoder::write_samples_32bit_stereo(uint8_t *output_buffer, uint32_t block_size, uint32_t shift_amount) {
+  int32_t *output_samples = reinterpret_cast<int32_t *>(output_buffer);
+  const int32_t *left = this->block_samples_;
+  const int32_t *right = this->block_samples_ + block_size;
+
+  for (uint32_t i = 0; i < block_size; ++i) {
+    output_samples[i * 2] = left[i] << shift_amount;
+    output_samples[i * 2 + 1] = right[i] << shift_amount;
+  }
+}
+
+FLAC_OPTIMIZE_O3
+void FLACDecoder::write_samples_32bit_mono(uint8_t *output_buffer, uint32_t block_size, uint32_t shift_amount) {
+  int32_t *output_samples = reinterpret_cast<int32_t *>(output_buffer);
+  const int32_t *samples = this->block_samples_;
+
+  for (uint32_t i = 0; i < block_size; ++i) {
+    output_samples[i] = samples[i] << shift_amount;
+  }
+}
+
+FLAC_OPTIMIZE_O3
+void FLACDecoder::write_samples_32bit_general(uint8_t *output_buffer, uint32_t block_size, uint32_t shift_amount) {
+  int32_t *output_samples = reinterpret_cast<int32_t *>(output_buffer);
+  uint32_t output_index = 0;
+
+  for (uint32_t i = 0; i < block_size; ++i) {
+    for (uint32_t ch = 0; ch < this->num_channels_; ++ch) {
+      output_samples[output_index++] = this->block_samples_[ch * block_size + i] << shift_amount;
     }
   }
 }

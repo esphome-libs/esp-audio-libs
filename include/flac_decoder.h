@@ -223,7 +223,8 @@ class FLACDecoder {
   /// @return FLAC_DECODER_SUCCESS on success
   ///         FLAC_DECODER_NO_MORE_FRAMES when end of stream reached
   ///         Error code on failure
-  FLACDecoderResult decode_frame(const uint8_t *buffer, size_t buffer_length, uint8_t *output_buffer, uint32_t *num_samples);
+  FLACDecoderResult decode_frame(const uint8_t *buffer, size_t buffer_length, uint8_t *output_buffer,
+                                 uint32_t *num_samples);
 
   // ========================================
   // Stream Information Getters
@@ -236,7 +237,13 @@ class FLACDecoder {
   uint64_t get_num_samples() const { return this->num_samples_; }
 
   /// Get number of bytes per sample in output (e.g., 2 for 16-bit, 3 for 24-bit)
-  uint32_t get_output_bytes_per_sample() const { return (this->sample_depth_ + 7) / 8; }
+  /// Returns 4 when 32-bit output mode is enabled
+  uint32_t get_output_bytes_per_sample() const {
+    if (this->output_32bit_samples_) {
+      return 4;
+    }
+    return (this->sample_depth_ + 7) / 8;
+  }
 
   /// Get sample rate in Hz (e.g., 44100, 48000)
   uint32_t get_sample_rate() const { return this->sample_rate_; }
@@ -329,6 +336,19 @@ class FLACDecoder {
   /// Get current CRC checking state
   bool get_crc_check_enabled() const { return this->enable_crc_check_; }
 
+  /// @brief Enable or disable 32-bit sample output mode
+  ///
+  /// When enabled, all samples are output as 32-bit values regardless of the
+  /// original bit depth. Samples are left-justified (MSB-aligned), so 24-bit
+  /// audio is shifted left by 8, 16-bit by 16, etc. This simplifies downstream
+  /// processing on embedded devices by avoiding 3-byte packed samples.
+  ///
+  /// @param enabled true to enable 32-bit output, false for native packing (default)
+  void set_output_32bit_samples(bool enabled) { this->output_32bit_samples_ = enabled; }
+
+  /// Get current 32-bit sample output state
+  bool get_output_32bit_samples() const { return this->output_32bit_samples_; }
+
  private:
   // ========================================
   // Frame Decoding
@@ -406,6 +426,15 @@ class FLACDecoder {
   void write_samples_general(uint8_t *output_buffer, uint32_t block_size, uint32_t bytes_per_sample,
                              uint32_t shift_amount, uint32_t sample_depth);
 
+  /// @brief Write decoded samples to output buffer using 32-bit stereo fast path
+  void write_samples_32bit_stereo(uint8_t *output_buffer, uint32_t block_size, uint32_t shift_amount);
+
+  /// @brief Write decoded samples to output buffer using 32-bit mono fast path
+  void write_samples_32bit_mono(uint8_t *output_buffer, uint32_t block_size, uint32_t shift_amount);
+
+  /// @brief Write decoded samples to output buffer using 32-bit general path (>2 channels)
+  void write_samples_32bit_general(uint8_t *output_buffer, uint32_t block_size, uint32_t shift_amount);
+
   // ========================================
   // Input Buffer State
   // ========================================
@@ -446,8 +475,9 @@ class FLACDecoder {
   // ========================================
   // Decoder State Flags
   // ========================================
-  bool out_of_data_ = false;      // Flag indicating end of input data reached
-  bool enable_crc_check_ = true;  // Flag to enable/disable CRC validation
+  bool out_of_data_ = false;           // Flag indicating end of input data reached
+  bool enable_crc_check_ = true;       // Flag to enable/disable CRC validation
+  bool output_32bit_samples_ = false;  // Output all samples as 32-bit
 
   // ========================================
   // Header Parsing State (for streaming)
