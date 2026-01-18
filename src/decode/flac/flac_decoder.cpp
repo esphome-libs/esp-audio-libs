@@ -279,7 +279,7 @@ FLACDecoderResult FLACDecoder::decode_frame(const uint8_t *buffer, size_t buffer
 
 FLAC_OPTIMIZE_O3
 void FLACDecoder::write_samples_16bit_stereo(uint8_t *output_buffer, uint32_t block_size) {
-  // 16-bit mono fast path
+  // 16-bit stereo fast path
   int16_t *output_samples = reinterpret_cast<int16_t *>(output_buffer);
 
   for (uint32_t i = 0; i < block_size; ++i) {
