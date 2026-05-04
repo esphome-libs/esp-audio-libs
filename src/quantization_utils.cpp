@@ -1,5 +1,7 @@
 #include "quantization_utils.h"
 
+#include <cstddef>
+
 namespace esp_audio_libs {
 namespace quantization_utils {
 
