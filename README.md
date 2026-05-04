@@ -14,6 +14,6 @@ The FLAC, MP3, and WAV decoders, as well as the public DSP functions, were remov
 - FLAC decoding: [esphome-libs/micro-flac](https://github.com/esphome-libs/micro-flac)
 - MP3 decoding: [esphome-libs/micro-mp3](https://github.com/esphome-libs/micro-mp3)
 - WAV header parsing: [esphome-libs/micro-wav](https://github.com/esphome-libs/micro-wav)
-- DSP functions (biquad, dot product, fixed-point add/multiply): use [esp-dsp](https://github.com/espressif/esp-dsp) directly.
+- DSP functions (esp-dsp's `dsps_biquad_f32`, `dsps_dotprod_f32`, `dsps_add_s16`, `dsps_mulc_s16`): use [esp-dsp](https://github.com/espressif/esp-dsp) directly.
 
 The replacements are not drop-in API-compatible.
