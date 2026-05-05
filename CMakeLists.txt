@@ -8,6 +8,7 @@ set(srcs
   src/resample/resampler.cpp
   src/quantization_utils.cpp
   src/memory_utils.cpp
+  src/gain.cpp
   )
 
 if(ESP_PLATFORM)
