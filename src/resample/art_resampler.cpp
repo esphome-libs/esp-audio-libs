@@ -8,7 +8,7 @@
 
 #include "art_resampler.h"
 
-#include "dsp.h"
+#include "../dsp/dsp.h"
 #include "../memory_utils.h"
 
 namespace esp_audio_libs {

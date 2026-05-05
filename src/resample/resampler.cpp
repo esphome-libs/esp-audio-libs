@@ -1,5 +1,5 @@
 #include "resampler.h"
-#include "quantization_utils.h"
+#include "../quantization_utils.h"
 #include "../memory_utils.h"
 
 namespace esp_audio_libs {

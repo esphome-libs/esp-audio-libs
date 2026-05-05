@@ -1,4 +1,4 @@
-description: "A collection of libraries and functions that are useful for playing audio on ESP32 devices"
+description: "Audio resampling library for ESP32 devices"
 url: "https://github.com/esphome/esp-audio-libs"
 repository: "https://github.com/esphome/esp-audio-libs.git"
 files:
