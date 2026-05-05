@@ -1,6 +1,6 @@
 {
     "name": "esp-audio-libs",
-    "version": "2.0.4",
+    "version": "3.0.0",
     "description": "Audio resampling library for ESP32 devices",
     "keywords": "audio",
     "repository":
