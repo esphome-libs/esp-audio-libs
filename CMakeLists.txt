@@ -10,6 +10,7 @@ set(srcs
   src/memory_utils.cpp
   src/gain.cpp
   src/ducking.cpp
+  src/pcm_convert.cpp
   )
 
 if(ESP_PLATFORM)
