@@ -143,11 +143,10 @@ void copy_frames(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8
     return;
   }
 
-  // Pick the aligned fast path if both pointers satisfy the strictest sample-width alignment in
-  // use across the two buffers; otherwise fall back to the byte-wise path.
-  const uintptr_t align_mask = alignment_mask(input_bps) | alignment_mask(output_bps);
-  const uintptr_t ptr_or = reinterpret_cast<uintptr_t>(input) | reinterpret_cast<uintptr_t>(output);
-  const bool aligned = (ptr_or & align_mask) == 0;
+  // Pick the aligned fast path only if each buffer satisfies the alignment its own sample width
+  // requires; otherwise fall back to the byte-wise path.
+  const bool aligned = (reinterpret_cast<uintptr_t>(input) & alignment_mask(input_bps)) == 0 &&
+                       (reinterpret_cast<uintptr_t>(output) & alignment_mask(output_bps)) == 0;
 
   if (aligned) {
     copy_frames_dispatch_input<true>(input, output, input_bps, output_bps, input_channels, output_channels, frames);

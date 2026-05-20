@@ -152,13 +152,11 @@ void mix_frames(const uint8_t *primary, uint8_t primary_bps, uint8_t primary_cha
     return;
   }
 
-  // Pick the aligned fast path if every pointer satisfies the strictest sample-width alignment in
-  // use across the three buffers; otherwise fall back to the byte-wise path.
-  const uintptr_t align_mask =
-      alignment_mask(primary_bps) | alignment_mask(secondary_bps) | alignment_mask(output_bps);
-  const uintptr_t ptr_or = reinterpret_cast<uintptr_t>(primary) | reinterpret_cast<uintptr_t>(secondary) |
-                           reinterpret_cast<uintptr_t>(output);
-  const bool aligned = (ptr_or & align_mask) == 0;
+  // Pick the aligned fast path only if each buffer satisfies the alignment its own sample width
+  // requires; otherwise fall back to the byte-wise path.
+  const bool aligned = (reinterpret_cast<uintptr_t>(primary) & alignment_mask(primary_bps)) == 0 &&
+                       (reinterpret_cast<uintptr_t>(secondary) & alignment_mask(secondary_bps)) == 0 &&
+                       (reinterpret_cast<uintptr_t>(output) & alignment_mask(output_bps)) == 0;
 
   if (aligned) {
     mix_frames_dispatch_primary<true>(primary_bps, secondary_bps, output_bps, primary, primary_channels, secondary,
