@@ -9,6 +9,9 @@ set(srcs
   src/quantization_utils.cpp
   src/memory_utils.cpp
   src/gain.cpp
+  src/ducking.cpp
+  src/mixer.cpp
+  src/pcm_convert.cpp
   )
 
 if(ESP_PLATFORM)

@@ -4,56 +4,10 @@
 #include <cstdint>
 
 #include "compiler.h"
+#include "q31_utils.h"
 
 namespace esp_audio_libs {
 namespace gain {
-
-namespace {
-
-/// Load a sample of `bytes_per_sample` bytes and place it in Q31 form (sign extended into the
-/// upper bits of an int32). Byte-wise access, so it is safe for any pointer alignment.
-inline int32_t unpack_audio_sample_to_q31(const uint8_t *data, size_t bytes_per_sample) {
-  uint32_t sample = 0;
-  if (bytes_per_sample == 1) {
-    sample |= static_cast<uint32_t>(data[0]) << 24;
-  } else if (bytes_per_sample == 2) {
-    sample |= static_cast<uint32_t>(data[0]) << 16;
-    sample |= static_cast<uint32_t>(data[1]) << 24;
-  } else if (bytes_per_sample == 3) {
-    sample |= static_cast<uint32_t>(data[0]) << 8;
-    sample |= static_cast<uint32_t>(data[1]) << 16;
-    sample |= static_cast<uint32_t>(data[2]) << 24;
-  } else if (bytes_per_sample == 4) {
-    sample |= static_cast<uint32_t>(data[0]);
-    sample |= static_cast<uint32_t>(data[1]) << 8;
-    sample |= static_cast<uint32_t>(data[2]) << 16;
-    sample |= static_cast<uint32_t>(data[3]) << 24;
-  }
-  return static_cast<int32_t>(sample);
-}
-
-/// Pack a Q31 sample as `bytes_per_sample` bytes, keeping the most significant bytes. Byte-wise
-/// access, so it is safe for any pointer alignment. The caller is responsible for adding any
-/// rounding term to `sample` before calling.
-inline void pack_q31_as_audio_sample(int32_t sample, uint8_t *data, size_t bytes_per_sample) {
-  if (bytes_per_sample == 1) {
-    data[0] = static_cast<uint8_t>(sample >> 24);
-  } else if (bytes_per_sample == 2) {
-    data[0] = static_cast<uint8_t>(sample >> 16);
-    data[1] = static_cast<uint8_t>(sample >> 24);
-  } else if (bytes_per_sample == 3) {
-    data[0] = static_cast<uint8_t>(sample >> 8);
-    data[1] = static_cast<uint8_t>(sample >> 16);
-    data[2] = static_cast<uint8_t>(sample >> 24);
-  } else if (bytes_per_sample == 4) {
-    data[0] = static_cast<uint8_t>(sample);
-    data[1] = static_cast<uint8_t>(sample >> 8);
-    data[2] = static_cast<uint8_t>(sample >> 16);
-    data[3] = static_cast<uint8_t>(sample >> 24);
-  }
-}
-
-}  // namespace
 
 int32_t db_to_q31(float db) {
   if (std::isnan(db)) {
@@ -80,24 +34,23 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
   // This yields a Q30 result in int32. That int32 sample is shifted to restore the original bit
   // width. A rounding term is added for the 8 bit, 16 bit, and 24 bit cases.
   //
-  // The 16 and 32 bit cases load samples via EAL_MEMCPY into local int16_t/int32_t variables.
-  // After EAL_ASSUME_ALIGNED, the compiler folds these into single-instruction aligned loads
-  // (l16si/l32i on Xtensa). Xtensa raises an alignment exception on misaligned word/halfword
-  // loads, so a runtime check gates this path; misaligned buffers fall back to a byte-wise
-  // slow path that produces identical output.
+  // The 16 and 32 bit cases dispatch on a runtime alignment check: aligned buffers use the
+  // fast_unpack_to_q31<> helper (which folds the load into a single l16si/l32i on Xtensa), and
+  // misaligned buffers fall back to the byte-wise unpack_to_q31<> path that produces identical
+  // output. Xtensa raises an alignment exception on misaligned word/halfword loads, so the
+  // runtime gate is required.
   switch (bytes_per_sample) {
     case 1: {
       // 8 bit input shifted left by 24 to reach Q31. The high-half multiply produces s * sf >> 8.
       // Shift right by 23 to recover the 8 bit sample. Rounding term is 1 << 22.
       constexpr int32_t rounding = 1 << 22;
-      const int8_t *in = reinterpret_cast<const int8_t *>(audio_samples);
       int8_t *out = reinterpret_cast<int8_t *>(output_buffer);
       size_t i = 0;
       for (; i + 4 <= samples_to_scale; i += 4) {
-        const int32_t s0 = static_cast<int32_t>(static_cast<uint32_t>(in[i]) << 24);
-        const int32_t s1 = static_cast<int32_t>(static_cast<uint32_t>(in[i + 1]) << 24);
-        const int32_t s2 = static_cast<int32_t>(static_cast<uint32_t>(in[i + 2]) << 24);
-        const int32_t s3 = static_cast<int32_t>(static_cast<uint32_t>(in[i + 3]) << 24);
+        const int32_t s0 = internal::unpack_to_q31<1>(audio_samples + i);
+        const int32_t s1 = internal::unpack_to_q31<1>(audio_samples + i + 1);
+        const int32_t s2 = internal::unpack_to_q31<1>(audio_samples + i + 2);
+        const int32_t s3 = internal::unpack_to_q31<1>(audio_samples + i + 3);
         const int32_t high0 =
             static_cast<int32_t>((static_cast<int64_t>(s0) * static_cast<int64_t>(q31_scale)) >> 32);
         const int32_t high1 =
@@ -112,7 +65,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
         out[i + 3] = static_cast<int8_t>((high3 + rounding) >> 23);
       }
       for (; i < samples_to_scale; ++i) {
-        const int32_t s = static_cast<int32_t>(static_cast<uint32_t>(in[i]) << 24);
+        const int32_t s = internal::unpack_to_q31<1>(audio_samples + i);
         const int32_t high =
             static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
         out[i] = static_cast<int8_t>((high + rounding) >> 23);
@@ -127,22 +80,17 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
                              reinterpret_cast<uintptr_t>(output_buffer)) &
                             0x1) == 0;
       if (aligned) {
-        // EAL_MEMCPY avoids strict-aliasing UB. EAL_ASSUME_ALIGNED tells the compiler the buffers
-        // are 2-byte aligned (which the runtime check above just established) so the memcpy folds
-        // to a single l16si/s16i instead of byte-wise loads.
-        const uint8_t *in = static_cast<const uint8_t *>(EAL_ASSUME_ALIGNED(audio_samples, 2));
+        // Output stores use EAL_MEMCPY (to avoid strict-aliasing UB) with EAL_ASSUME_ALIGNED on
+        // `out` (just established by the runtime check above) so each memcpy folds to a single
+        // s16i on Xtensa. Aligned input loads are handled inside fast_unpack_to_q31<2>.
+        const uint8_t *in = audio_samples;
         uint8_t *out = static_cast<uint8_t *>(EAL_ASSUME_ALIGNED(output_buffer, 2));
         size_t i = 0;
         for (; i + 4 <= samples_to_scale; i += 4) {
-          int16_t v0, v1, v2, v3;
-          EAL_MEMCPY(&v0, in + (i + 0) * 2, sizeof(int16_t));
-          EAL_MEMCPY(&v1, in + (i + 1) * 2, sizeof(int16_t));
-          EAL_MEMCPY(&v2, in + (i + 2) * 2, sizeof(int16_t));
-          EAL_MEMCPY(&v3, in + (i + 3) * 2, sizeof(int16_t));
-          const int32_t s0 = static_cast<int32_t>(static_cast<uint32_t>(v0) << 16);
-          const int32_t s1 = static_cast<int32_t>(static_cast<uint32_t>(v1) << 16);
-          const int32_t s2 = static_cast<int32_t>(static_cast<uint32_t>(v2) << 16);
-          const int32_t s3 = static_cast<int32_t>(static_cast<uint32_t>(v3) << 16);
+          const int32_t s0 = internal::fast_unpack_to_q31<2>(in + (i + 0) * 2);
+          const int32_t s1 = internal::fast_unpack_to_q31<2>(in + (i + 1) * 2);
+          const int32_t s2 = internal::fast_unpack_to_q31<2>(in + (i + 2) * 2);
+          const int32_t s3 = internal::fast_unpack_to_q31<2>(in + (i + 3) * 2);
           const int32_t high0 =
               static_cast<int32_t>((static_cast<int64_t>(s0) * static_cast<int64_t>(q31_scale)) >> 32);
           const int32_t high1 =
@@ -161,9 +109,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
           EAL_MEMCPY(out + (i + 3) * 2, &r3, sizeof(int16_t));
         }
         for (; i < samples_to_scale; ++i) {
-          int16_t v;
-          EAL_MEMCPY(&v, in + i * 2, sizeof(int16_t));
-          const int32_t s = static_cast<int32_t>(static_cast<uint32_t>(v) << 16);
+          const int32_t s = internal::fast_unpack_to_q31<2>(in + i * 2);
           const int32_t high =
               static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
           const int16_t r = static_cast<int16_t>((high + rounding) >> 15);
@@ -173,13 +119,13 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
         for (size_t i = 0; i < samples_to_scale; ++i) {
           const uint8_t *p_in = audio_samples + (i * 2);
           uint8_t *p_out = output_buffer + (i * 2);
-          const int32_t s = unpack_audio_sample_to_q31(p_in, 2);
+          const int32_t s = internal::unpack_to_q31<2>(p_in);
           const int32_t high =
               static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
           // Round and convert Q30 to Q31 form so pack keeps the right bytes.
           const int32_t scaled_q31 =
               static_cast<int32_t>(static_cast<uint32_t>(high + rounding) << 1);
-          pack_q31_as_audio_sample(scaled_q31, p_out, 2);
+          internal::pack_q31<2>(scaled_q31, p_out);
         }
       }
       break;
@@ -191,11 +137,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
       for (size_t i = 0; i < samples_to_scale; ++i) {
         const uint8_t *p_in = audio_samples + (i * 3);
         uint8_t *p_out = output_buffer + (i * 3);
-        // Little-endian 24 bit load with sign extension from bit 23.
-        const int32_t sample =
-            static_cast<int32_t>(static_cast<uint32_t>(p_in[0]) | (static_cast<uint32_t>(p_in[1]) << 8) |
-                                 (static_cast<uint32_t>(p_in[2]) << 16) | ((p_in[2] & 0x80) ? 0xFF000000u : 0u));
-        const int32_t s = static_cast<int32_t>(static_cast<uint32_t>(sample) << 8);
+        const int32_t s = internal::unpack_to_q31<3>(p_in);
         const int32_t high =
             static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
         const int32_t scaled = (high + rounding) >> 7;
@@ -214,18 +156,17 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
                              reinterpret_cast<uintptr_t>(output_buffer)) &
                             0x3) == 0;
       if (aligned) {
-        // EAL_MEMCPY avoids strict-aliasing UB. EAL_ASSUME_ALIGNED tells the compiler the buffers
-        // are 4-byte aligned (which the runtime check above just established) so the memcpy folds
-        // to a single l32i/s32i instead of byte-wise loads.
-        const uint8_t *in = static_cast<const uint8_t *>(EAL_ASSUME_ALIGNED(audio_samples, 4));
+        // Output stores use EAL_MEMCPY (to avoid strict-aliasing UB) with EAL_ASSUME_ALIGNED on
+        // `out` (just established by the runtime check above) so each memcpy folds to a single
+        // s32i on Xtensa. Aligned input loads are handled inside fast_unpack_to_q31<4>.
+        const uint8_t *in = audio_samples;
         uint8_t *out = static_cast<uint8_t *>(EAL_ASSUME_ALIGNED(output_buffer, 4));
         size_t i = 0;
         for (; i + 4 <= samples_to_scale; i += 4) {
-          int32_t v0, v1, v2, v3;
-          EAL_MEMCPY(&v0, in + (i + 0) * 4, sizeof(int32_t));
-          EAL_MEMCPY(&v1, in + (i + 1) * 4, sizeof(int32_t));
-          EAL_MEMCPY(&v2, in + (i + 2) * 4, sizeof(int32_t));
-          EAL_MEMCPY(&v3, in + (i + 3) * 4, sizeof(int32_t));
+          const int32_t v0 = internal::fast_unpack_to_q31<4>(in + (i + 0) * 4);
+          const int32_t v1 = internal::fast_unpack_to_q31<4>(in + (i + 1) * 4);
+          const int32_t v2 = internal::fast_unpack_to_q31<4>(in + (i + 2) * 4);
+          const int32_t v3 = internal::fast_unpack_to_q31<4>(in + (i + 3) * 4);
           const int32_t high0 =
               static_cast<int32_t>((static_cast<int64_t>(v0) * static_cast<int64_t>(q31_scale)) >> 32);
           const int32_t high1 =
@@ -244,8 +185,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
           EAL_MEMCPY(out + (i + 3) * 4, &r3, sizeof(int32_t));
         }
         for (; i < samples_to_scale; ++i) {
-          int32_t v;
-          EAL_MEMCPY(&v, in + i * 4, sizeof(int32_t));
+          const int32_t v = internal::fast_unpack_to_q31<4>(in + i * 4);
           const int32_t high =
               static_cast<int32_t>((static_cast<int64_t>(v) * static_cast<int64_t>(q31_scale)) >> 32);
           const int32_t r = static_cast<int32_t>(static_cast<uint32_t>(high) << 1);
@@ -255,11 +195,11 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
         for (size_t i = 0; i < samples_to_scale; ++i) {
           const uint8_t *p_in = audio_samples + (i * 4);
           uint8_t *p_out = output_buffer + (i * 4);
-          const int32_t s = unpack_audio_sample_to_q31(p_in, 4);
+          const int32_t s = internal::unpack_to_q31<4>(p_in);
           const int32_t high =
               static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
           const int32_t scaled_q31 = static_cast<int32_t>(static_cast<uint32_t>(high) << 1);
-          pack_q31_as_audio_sample(scaled_q31, p_out, 4);
+          internal::pack_q31<4>(scaled_q31, p_out);
         }
       }
       break;

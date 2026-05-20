@@ -18,6 +18,14 @@
 #define EAL_MEMCPY(dst, src, n) std::memcpy((dst), (src), (n))
 #endif
 
+// Mark a function as hot: optimize it aggressively and group it with other hot code for better
+// instruction-cache locality. No-op on compilers without the attribute.
+#if defined(__GNUC__) || defined(__clang__)
+#define EAL_HOT __attribute__((hot))
+#else
+#define EAL_HOT
+#endif
+
 // Tell the optimizer that `ptr` is aligned to `n` bytes. Caller is responsible
 // for guaranteeing the precondition (typically via a runtime check). Lets
 // follow-up loads/stores fold into single aligned-access instructions on
