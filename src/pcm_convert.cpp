@@ -68,7 +68,9 @@ EAL_HOT void copy_frames_fixed_channels(const uint8_t *in_ptr, uint8_t *out_ptr,
 template<size_t InputBps, size_t OutputBps, bool Aligned>
 EAL_HOT void copy_frames_dispatch_channels(const uint8_t *in_ptr, uint8_t *out_ptr, uint8_t input_channels,
                                            uint8_t output_channels, uint32_t frames) {
-  // Fast paths for the common 1- and 2-channel configurations.
+  // Matching channel counts are rewritten to the 1->1 path by copy_frames(), so only the
+  // mismatched mono/stereo remaps need a fixed-channel specialization here. The 1->1 case still
+  // arrives via that rewrite (it carries frames*channels samples).
   if (output_channels == 1) {
     if (input_channels == 1)
       return copy_frames_fixed_channels<InputBps, OutputBps, 1, 1, Aligned>(in_ptr, out_ptr, frames);
@@ -77,10 +79,8 @@ EAL_HOT void copy_frames_dispatch_channels(const uint8_t *in_ptr, uint8_t *out_p
   } else if (output_channels == 2) {
     if (input_channels == 1)
       return copy_frames_fixed_channels<InputBps, OutputBps, 1, 2, Aligned>(in_ptr, out_ptr, frames);
-    if (input_channels == 2)
-      return copy_frames_fixed_channels<InputBps, OutputBps, 2, 2, Aligned>(in_ptr, out_ptr, frames);
   }
-  // Fallback for unusual channel counts (3+ channels in or out).
+  // Fallback for unusual channel remaps (3+ channels in or out, with differing counts).
   copy_frames_generic<InputBps, OutputBps, Aligned>(in_ptr, out_ptr, input_channels, output_channels, frames);
 }
 
@@ -141,6 +141,17 @@ void copy_frames(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8
   if (input_bps == output_bps && input_channels == output_channels) {
     std::memcpy(output, input, static_cast<size_t>(frames) * input_channels * input_bps);
     return;
+  }
+
+  // When the channel counts match, bit-depth conversion is purely per-sample and the interleaved
+  // channel layout is irrelevant: treat the buffers as a flat run of frames*channels mono samples
+  // and convert each independently. This lets every matching-channel case (including 3+ channels)
+  // reuse the unrolled 1->1 path instead of needing its own specialization or the generic loop.
+  // frames*channels stays within uint32_t under the documented byte-count-fits-size_t precondition.
+  if (input_channels == output_channels) {
+    frames *= input_channels;
+    input_channels = 1;
+    output_channels = 1;
   }
 
   // Pick the aligned fast path only if each buffer satisfies the alignment its own sample width
