@@ -52,12 +52,15 @@ void set_target(DuckingState &state, uint8_t decibel_reduction, uint32_t transit
     state.db_change_per_step = -1;
   }
 
-  if (transition_samples > 0 && total_steps > 0) {
+  if (transition_samples > 0 && total_steps > 0 && transition_samples / total_steps > 0) {
     state.samples_per_step = transition_samples / total_steps;
     // Re-derive remaining samples so it is an exact multiple of samples_per_step.
     state.transition_samples_remaining = state.samples_per_step * total_steps;
     state.current_db_reduction += state.db_change_per_step;
   } else {
+    // No transition time, no intermediate steps, or too few samples to give each step at least one
+    // sample (samples_per_step would round to 0): jump straight to the target rather than stalling
+    // the ramp partway.
     state.transition_samples_remaining = 0;
     state.current_db_reduction = static_cast<int8_t>(state.target_db_reduction);
   }
