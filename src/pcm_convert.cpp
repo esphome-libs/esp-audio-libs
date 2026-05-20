@@ -134,7 +134,8 @@ inline uintptr_t alignment_mask(uint8_t bps) {
 
 void copy_frames(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8_t input_channels, uint8_t output_bps,
                  uint8_t output_channels, uint32_t frames) {
-  if (frames == 0 || input_bps < 1 || input_bps > 4 || output_bps < 1 || output_bps > 4) {
+  if (frames == 0 || input_channels == 0 || output_channels == 0 || input_bps < 1 || input_bps > 4 ||
+      output_bps < 1 || output_bps > 4) {
     return;
   }
 
