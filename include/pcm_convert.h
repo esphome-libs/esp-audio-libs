@@ -24,9 +24,11 @@ namespace pcm_convert {
 /// dispatch, but aligning each pointer to its sample width (2 bytes for 16-bit, 4 bytes for
 /// 32-bit) lets the function take the wide-load fast path on architectures like Xtensa.
 ///
-/// @note The total byte count `frames * input_channels * input_bps` must fit in `size_t`. On
-/// 32-bit targets that caps a single call at ~4 GiB of input, well beyond any realistic audio
-/// buffer; the caller is responsible for not exceeding it.
+/// @note The total byte count `frames * input_channels * input_bps` must fit in `size_t`, and
+/// `frames * input_channels` must fit in `uint32_t`. On 32-bit targets the first condition implies
+/// the second and caps a single call at ~4 GiB of input, well beyond any realistic audio buffer.
+/// On 64-bit hosts `size_t` is wider, so the caller must keep `frames * input_channels` within
+/// `uint32_t` directly. The caller is responsible for not exceeding these limits.
 ///
 /// @param input Source buffer of interleaved samples.
 /// @param output Destination buffer (must not alias the input).

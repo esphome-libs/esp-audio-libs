@@ -147,7 +147,8 @@ void copy_frames(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8
   // channel layout is irrelevant: treat the buffers as a flat run of frames*channels mono samples
   // and convert each independently. This lets every matching-channel case (including 3+ channels)
   // reuse the unrolled 1->1 path instead of needing its own specialization or the generic loop.
-  // frames*channels stays within uint32_t under the documented byte-count-fits-size_t precondition.
+  // frames*channels stays within uint32_t by the documented precondition: on 32-bit targets it
+  // follows from the byte-count-fits-size_t rule; on 64-bit hosts the caller guarantees it directly.
   if (input_channels == output_channels) {
     frames *= input_channels;
     input_channels = 1;
