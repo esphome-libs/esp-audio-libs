@@ -20,11 +20,13 @@ constexpr int32_t Q30_MIN = -(INT32_C(1) << 30);
 constexpr int32_t Q30_MAX = (INT32_C(1) << 30) - 1;
 
 // Sum two Q31 inputs into a saturated Q31 output. Each input is halved before adding so the sum
-// stays in int32; the result is clamped to the Q30 range and shifted back to Q31, which
-// preventsthe left shift from overflowing.
+// stays in int32; the result is clamped to the Q30 range and shifted back to Q31. The shift goes
+// through uint32_t because left-shifting a negative signed value is undefined before C++20; the
+// clamp guarantees the shifted result still fits in int32.
 EAL_HOT inline int32_t mix_q31(int32_t primary_q31, int32_t secondary_q31) {
   const int32_t sum_q30 = (primary_q31 >> 1) + (secondary_q31 >> 1);
-  return std::min(std::max(sum_q30, Q30_MIN), Q30_MAX) << 1;
+  const int32_t clamped_q30 = std::min(std::max(sum_q30, Q30_MIN), Q30_MAX);
+  return static_cast<int32_t>(static_cast<uint32_t>(clamped_q30) << 1);
 }
 
 // Pick the fast (aligned wide-load) or byte-wise variant at compile time. The `Aligned` template
