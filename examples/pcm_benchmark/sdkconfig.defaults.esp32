@@ -1,0 +1,5 @@
+# Plain ESP32 specific overrides.
+#
+# The benchmark keeps its working buffers in internal RAM, so no PSRAM is
+# required. This file is intentionally minimal; the common defaults already
+# select 240 MHz and the performance optimization level.

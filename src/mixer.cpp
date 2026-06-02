@@ -1,6 +1,7 @@
 #include "mixer.h"
 
 #include <algorithm>
+#include <cstdint>
 
 #include "compiler.h"
 #include "q31_utils.h"
@@ -15,19 +16,14 @@ using internal::fast_unpack_to_q31;
 using internal::pack_q31;
 using internal::unpack_to_q31;
 
-// Mix in Q30 so the sum stays in a 32-bit register; the right shift loses 1 LSB per input.
-constexpr int32_t Q30_MIN = -(INT32_C(1) << 30);
-constexpr int32_t Q30_MAX = (INT32_C(1) << 30) - 1;
-
-// Sum two Q31 inputs into a saturated Q31 output. Each input is halved before adding so the sum
-// stays in int32; the result is clamped to the Q30 range and shifted back to Q31. The shift goes
-// through uint32_t because left-shifting a negative signed value is undefined before C++20; the
-// clamp guarantees the shifted result still fits in int32.
-EAL_HOT inline int32_t mix_q31(int32_t primary_q31, int32_t secondary_q31) {
-  const int32_t sum_q30 = (primary_q31 >> 1) + (secondary_q31 >> 1);
-  const int32_t clamped_q30 = std::min(std::max(sum_q30, Q30_MIN), Q30_MAX);
-  return static_cast<int32_t>(static_cast<uint32_t>(clamped_q30) << 1);
-}
+// Each input is right-shifted MIX_SHIFT bits before the two are summed. Two bits of headroom (vs.
+// the minimum of one) leave enough room that the rounding term can be added without overflowing
+// int32, so the whole mix stays in 32-bit math. The cost is 2 discarded LSB of true 31/32-bit-deep
+// input content (inaudible); 16- and 24-bit inputs are unaffected since they carry trailing zeros.
+// The clamp range is Q(31 - MIX_SHIFT): MIX_MAX maps exactly to full scale at every output depth.
+constexpr int MIX_SHIFT = 2;
+constexpr int32_t MIX_MIN = -(INT32_C(1) << (31 - MIX_SHIFT));
+constexpr int32_t MIX_MAX = (INT32_C(1) << (31 - MIX_SHIFT)) - 1;
 
 // Pick the fast (aligned wide-load) or byte-wise variant at compile time. The `Aligned` template
 // flag is set by the runtime alignment check in mix_frames(); both branches fold away at -O2.
@@ -46,37 +42,60 @@ template<size_t Bps, bool Aligned> EAL_HOT inline void pack(int32_t sample, uint
   }
 }
 
-// Hot path: the two inputs and the output all share one sample width. Templating on a single `Bps`
-// (instead of the full primary x secondary x output matrix) keeps this fully inlined and a
-// zero-overhead-loop candidate while collapsing the instantiation count from 4*4*4 to 4 per
-// alignment variant.
+// Sum two Q31 inputs, round for a Bps-byte output, and store the result. Each input is shifted
+// right by MIX_SHIFT before adding so the pre-round sum plus the rounding term stay within int32;
+// the rounding term is added before the clamp, so the single [MIX_MIN, MIX_MAX] clamp guards both
+// the mix saturation and the rounding overflow: MIX_MAX maps exactly to full scale at the output
+// depth (MIX_MAX >> ((4-Bps)*8 - MIX_SHIFT) == output max), so a rounded full-scale sample cannot
+// wrap. The final left shift goes through uint32_t because shifting a negative signed value is
+// undefined before C++20; the clamp guarantees the shifted result still fits in int32.
+template<size_t Bps, bool Aligned>
+EAL_HOT inline void mix_and_pack(int32_t primary_q31, int32_t secondary_q31, uint8_t *out) {
+  constexpr int net_shift = (4 - static_cast<int>(Bps)) * 8 - MIX_SHIFT;
+  // net_shift <= 0 only for Bps == 4 (32-bit output), which does not narrow and must not round, so
+  // round_term is 0 there; the `> 0` guard also keeps the shift below from going negative. The term
+  // is added unconditionally in the sum, so this 0 is load-bearing, not just a dead-branch value.
+  // TODO(C++17): an `if constexpr (net_shift > 0)` here would discard the Bps == 4 case outright and
+  // let round_term drop its guard.
+  constexpr int32_t round_term = net_shift > 0 ? (INT32_C(1) << (net_shift - 1)) : 0;
+  const int32_t sum = (primary_q31 >> MIX_SHIFT) + (secondary_q31 >> MIX_SHIFT) + round_term;
+  const int32_t clamped = std::min(std::max(sum, MIX_MIN), MIX_MAX);
+  pack<Bps, Aligned>(static_cast<int32_t>(static_cast<uint32_t>(clamped) << MIX_SHIFT), out);
+}
+
+// Hot path: the two inputs and the output all share one sample width, so a single `Bps` template
+// parameter covers all three and the unpack/pack stay fully inlined.
 template<size_t Bps, bool Aligned>
 EAL_HOT void mix_frames_same_bps(const uint8_t *pri_ptr, uint8_t primary_channels, const uint8_t *sec_ptr,
                                  uint8_t secondary_channels, uint8_t *out_ptr, uint8_t output_channels,
                                  uint32_t frames) {
   const uint8_t max_primary_channel_index = primary_channels - 1;
   const uint8_t max_secondary_channel_index = secondary_channels - 1;
+  const size_t pri_stride = static_cast<size_t>(primary_channels) * Bps;
+  const size_t sec_stride = static_cast<size_t>(secondary_channels) * Bps;
+  const size_t out_stride = static_cast<size_t>(output_channels) * Bps;
 
-  for (uint32_t frame = 0; frame < frames; ++frame) {
-    for (uint8_t out_ch = 0; out_ch < output_channels; ++out_ch) {
-      const uint8_t pri_ch = std::min<uint8_t>(out_ch, max_primary_channel_index);
-      const int32_t primary_q31 = unpack<Bps, Aligned>(pri_ptr + pri_ch * Bps);
+  for (uint8_t out_ch = 0; out_ch < output_channels; ++out_ch) {
+    const uint8_t pri_ch = std::min<uint8_t>(out_ch, max_primary_channel_index);
+    const uint8_t sec_ch = std::min<uint8_t>(out_ch, max_secondary_channel_index);
+    const uint8_t *pri = pri_ptr + pri_ch * Bps;
+    const uint8_t *sec = sec_ptr + sec_ch * Bps;
+    uint8_t *out = out_ptr + out_ch * Bps;
 
-      const uint8_t sec_ch = std::min<uint8_t>(out_ch, max_secondary_channel_index);
-      const int32_t secondary_q31 = unpack<Bps, Aligned>(sec_ptr + sec_ch * Bps);
-
-      pack<Bps, Aligned>(mix_q31(primary_q31, secondary_q31), out_ptr + out_ch * Bps);
+    for (uint32_t frame = 0; frame < frames; ++frame) {
+      const int32_t primary_q31 = unpack<Bps, Aligned>(pri);
+      const int32_t secondary_q31 = unpack<Bps, Aligned>(sec);
+      mix_and_pack<Bps, Aligned>(primary_q31, secondary_q31, out);
+      pri += pri_stride;
+      sec += sec_stride;
+      out += out_stride;
     }
-    pri_ptr += primary_channels * Bps;
-    sec_ptr += secondary_channels * Bps;
-    out_ptr += output_channels * Bps;
   }
 }
 
-// Runtime-width unpack for the mismatched-width path. A width switch on a loop-invariant `bps`
-// (well predicted) replaces the per-input-width template axis, so only the output width and the
-// alignment flag stay as template parameters. The `Aligned` flag selects the wide-load variant;
-// callers guarantee each buffer is aligned to its own width before picking it.
+// Runtime-width unpack for the mismatched-width path: a switch on `bps` keeps the input width off
+// the template axis. The `Aligned` flag selects the wide-load variant; callers guarantee each
+// buffer is aligned to its own width before picking it.
 template<bool Aligned> EAL_HOT inline int32_t unpack_runtime(const uint8_t *data, uint8_t bps) {
   switch (bps) {
     case 1:
@@ -91,28 +110,33 @@ template<bool Aligned> EAL_HOT inline int32_t unpack_runtime(const uint8_t *data
 }
 
 // Mismatched-width path: the three buffers do not share one sample width. The output width and
-// alignment are template parameters (so the per-output-sample pack is the inlined wide store and
-// carries no switch), while the two input widths are resolved by the runtime switch above.
+// alignment stay template parameters (so the pack inlines); the two input widths are resolved by
+// the runtime switch above.
 template<size_t OutputBps, bool Aligned>
 EAL_HOT void mix_frames_generic(const uint8_t *pri_ptr, uint8_t primary_bps, uint8_t primary_channels,
                                 const uint8_t *sec_ptr, uint8_t secondary_bps, uint8_t secondary_channels,
                                 uint8_t *out_ptr, uint8_t output_channels, uint32_t frames) {
   const uint8_t max_primary_channel_index = primary_channels - 1;
   const uint8_t max_secondary_channel_index = secondary_channels - 1;
+  const size_t pri_stride = static_cast<size_t>(primary_channels) * primary_bps;
+  const size_t sec_stride = static_cast<size_t>(secondary_channels) * secondary_bps;
+  const size_t out_stride = static_cast<size_t>(output_channels) * OutputBps;
 
-  for (uint32_t frame = 0; frame < frames; ++frame) {
-    for (uint8_t out_ch = 0; out_ch < output_channels; ++out_ch) {
-      const uint8_t pri_ch = std::min<uint8_t>(out_ch, max_primary_channel_index);
-      const int32_t primary_q31 = unpack_runtime<Aligned>(pri_ptr + pri_ch * primary_bps, primary_bps);
+  for (uint8_t out_ch = 0; out_ch < output_channels; ++out_ch) {
+    const uint8_t pri_ch = std::min<uint8_t>(out_ch, max_primary_channel_index);
+    const uint8_t sec_ch = std::min<uint8_t>(out_ch, max_secondary_channel_index);
+    const uint8_t *pri = pri_ptr + pri_ch * primary_bps;
+    const uint8_t *sec = sec_ptr + sec_ch * secondary_bps;
+    uint8_t *out = out_ptr + out_ch * OutputBps;
 
-      const uint8_t sec_ch = std::min<uint8_t>(out_ch, max_secondary_channel_index);
-      const int32_t secondary_q31 = unpack_runtime<Aligned>(sec_ptr + sec_ch * secondary_bps, secondary_bps);
-
-      pack<OutputBps, Aligned>(mix_q31(primary_q31, secondary_q31), out_ptr + out_ch * OutputBps);
+    for (uint32_t frame = 0; frame < frames; ++frame) {
+      const int32_t primary_q31 = unpack_runtime<Aligned>(pri, primary_bps);
+      const int32_t secondary_q31 = unpack_runtime<Aligned>(sec, secondary_bps);
+      mix_and_pack<OutputBps, Aligned>(primary_q31, secondary_q31, out);
+      pri += pri_stride;
+      sec += sec_stride;
+      out += out_stride;
     }
-    pri_ptr += primary_channels * primary_bps;
-    sec_ptr += secondary_channels * secondary_bps;
-    out_ptr += output_channels * OutputBps;
   }
 }
 

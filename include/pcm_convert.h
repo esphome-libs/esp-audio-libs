@@ -20,9 +20,19 @@ namespace pcm_convert {
 /// Sample format: signed PCM, little-endian for multi-byte widths, interleaved across channels.
 /// 8-bit samples are interpreted as int8 (0x00 is silence), not WAV-style uint8.
 ///
-/// The buffers must not overlap. Misaligned pointers are handled correctly via a runtime
-/// dispatch, but aligning each pointer to its sample width (2 bytes for 16-bit, 4 bytes for
-/// 32-bit) lets the function take the wide-load fast path on architectures like Xtensa.
+/// The buffers must not overlap, with one supported exception: in-place conversion where `output`
+/// exactly aliases `input` (same pointer). That is supported only when the channel count is
+/// unchanged and the output is no wider than the input (`output_bps <= input_bps`) — i.e.
+/// same-format (a no-op) or narrowing. Such a call is a single forward pass whose write pointer
+/// never overtakes the still-unread input. An exactly-aliased call that is *not* in that supported
+/// form (in-place widening or any change in channel count) is detected and returns without touching
+/// the buffer, so it is a defined no-op rather than silent corruption. This safety net covers only
+/// exact aliasing; partial overlap (an `output` offset into `input`) is undetectable and remains
+/// unsupported (undefined behavior).
+///
+/// Misaligned pointers are handled correctly via a runtime dispatch, but aligning each pointer to
+/// its sample width (2 bytes for 16-bit, 4 bytes for 32-bit) lets the function take the wide-load
+/// fast path on architectures like Xtensa.
 ///
 /// @note The total byte count `frames * input_channels * input_bps` must fit in `size_t`, and
 /// `frames * input_channels` must fit in `uint32_t`. On 32-bit targets the first condition implies
@@ -31,7 +41,8 @@ namespace pcm_convert {
 /// `uint32_t` directly. The caller is responsible for not exceeding these limits.
 ///
 /// @param input Source buffer of interleaved samples.
-/// @param output Destination buffer (must not alias the input).
+/// @param output Destination buffer. Must not overlap the input, except it may exactly alias it
+/// (`output == input`) for same-format or narrowing conversions that keep the channel count.
 /// @param input_bps Source sample width in bytes: 1, 2, 3, or 4. Other values are a no-op.
 /// @param input_channels Number of source channels (must be >= 1).
 /// @param output_bps Destination sample width in bytes: 1, 2, 3, or 4. Other values are a no-op.

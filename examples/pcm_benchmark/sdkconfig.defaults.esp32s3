@@ -1,0 +1,6 @@
+# ESP32-S3 specific overrides.
+
+# Use large data and instruction caches for steady-state throughput.
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y

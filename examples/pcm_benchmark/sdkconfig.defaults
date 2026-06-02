@@ -1,0 +1,13 @@
+# Common defaults for all targets.
+# Target-specific overrides live in sdkconfig.defaults.<target>.
+
+# Disable the task watchdog: the benchmark loops continuously in app_main.
+CONFIG_ESP_TASK_WDT_EN=n
+CONFIG_ESP_TASK_WDT_INIT=n
+
+# Run the CPU at its maximum frequency.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Optimize the benchmark translation unit for performance. (The library applies
+# its own -O2 internally regardless of this setting.)
+CONFIG_COMPILER_OPTIMIZATION_PERF=y

@@ -62,3 +62,11 @@ dist/
 
 flac_to_wav
 !flac_to_wav/
+
+# PlatformIO / ESP-IDF example build output
+.pio/
+examples/**/sdkconfig
+examples/**/sdkconfig.old
+examples/**/dependencies.lock
+examples/**/managed_components/
+examples/**/sdkconfig.esp32*
