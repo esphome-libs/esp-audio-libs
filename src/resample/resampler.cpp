@@ -25,11 +25,9 @@ bool Resampler::initialize(ResamplerConfiguration &config) {
   this->number_of_taps_ = config.number_of_taps;
   this->number_of_filters_ = config.number_of_filters;
 
-  this->float_input_buffer_ =
-      (float *) internal::alloc_psram_fallback(this->input_buffer_samples_ * sizeof(float));
+  this->float_input_buffer_ = (float *) internal::alloc_psram_fallback(this->input_buffer_samples_ * sizeof(float));
 
-  this->float_output_buffer_ =
-      (float *) internal::alloc_psram_fallback(this->output_buffer_samples_ * sizeof(float));
+  this->float_output_buffer_ = (float *) internal::alloc_psram_fallback(this->output_buffer_samples_ * sizeof(float));
 
   if ((this->float_input_buffer_ == nullptr) || (this->float_output_buffer_ == nullptr)) {
     return false;
@@ -40,7 +38,7 @@ bool Resampler::initialize(ResamplerConfiguration &config) {
     int flags = 0;
 
     if (config.subsample_interpolate) {
-      flags |= SUBSAMPLE_INTERPOLATE;
+      flags |= art_resampler::SUBSAMPLE_INTERPOLATE;
     }
 
     this->sample_ratio_ = config.target_sample_rate / config.source_sample_rate;
@@ -77,12 +75,12 @@ bool Resampler::initialize(ResamplerConfiguration &config) {
     }
 
     if (this->sample_ratio_ < 1.0f) {
-      this->resampler_ =
-          art_resampler::resampleInit(this->channels_, this->number_of_taps_, this->number_of_filters_,
-                                      this->sample_ratio_ * this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
+      this->resampler_ = art_resampler::resampleInit(this->channels_, this->number_of_taps_, this->number_of_filters_,
+                                                     this->sample_ratio_ * this->lowpass_ratio_,
+                                                     flags | art_resampler::INCLUDE_LOWPASS);
     } else if (this->lowpass_ratio_ < 1.0f) {
       this->resampler_ = art_resampler::resampleInit(this->channels_, this->number_of_taps_, this->number_of_filters_,
-                                                     this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
+                                                     this->lowpass_ratio_, flags | art_resampler::INCLUDE_LOWPASS);
     } else {
       this->resampler_ =
           art_resampler::resampleInit(this->channels_, this->number_of_taps_, this->number_of_filters_, 1.0f, flags);
