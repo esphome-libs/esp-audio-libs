@@ -18,9 +18,15 @@
 namespace esp_audio_libs {
 namespace art_resampler {
 
-#define SUBSAMPLE_INTERPOLATE 0x1
-#define BLACKMAN_HARRIS 0x2
-#define INCLUDE_LOWPASS 0x4
+// Flags for the `flags` parameter of resampleInit(). An enum rather than #defines so the
+// names stay scoped to this namespace instead of leaking into the global preprocessor
+// namespace, where common identifiers (e.g. BLACKMAN_HARRIS) collide with other libraries.
+// Left as an unscoped enum so the values keep implicitly converting to the int `flags` field.
+enum ResampleFlags {
+  SUBSAMPLE_INTERPOLATE = 0x1,
+  BLACKMAN_HARRIS = 0x2,
+  INCLUDE_LOWPASS = 0x4,
+};
 
 typedef struct {
   int numChannels, numSamples, numFilters, numTaps, inputIndex, flags;
