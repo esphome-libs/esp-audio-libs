@@ -14,17 +14,17 @@ namespace pcm_convert {
 /// Each output frame is built channel-by-channel. When the output has more channels than the
 /// input, the extra channels reuse the last input channel; when it has fewer, the trailing input
 /// channels are dropped. Bit-depth conversion goes through a Q31 intermediate: widening is exact,
-/// narrowing truncates the low bits (no dithering). When the input and output formats match
-/// exactly this degenerates to a plain memcpy.
+/// narrowing rounds to nearest (the dropped low bits are rounded, not truncated; no dithering).
+/// When the input and output formats match exactly this degenerates to a plain memcpy.
 ///
 /// Sample format: signed PCM, little-endian for multi-byte widths, interleaved across channels.
 /// 8-bit samples are interpreted as int8 (0x00 is silence), not WAV-style uint8.
 ///
 /// The buffers must not overlap, with one supported exception: in-place conversion where `output`
 /// exactly aliases `input` (same pointer). That is supported only when the channel count is
-/// unchanged and the output is no wider than the input (`output_bps <= input_bps`) — i.e.
+/// unchanged and the output is no wider than the input (`output_bps <= input_bps`); i.e.,
 /// same-format (a no-op) or narrowing. Such a call is a single forward pass whose write pointer
-/// never overtakes the still-unread input. An exactly-aliased call that is *not* in that supported
+/// never overtakes the still-unread input. An exactly-aliased call that is not in that supported
 /// form (in-place widening or any change in channel count) is detected and returns without touching
 /// the buffer, so it is a defined no-op rather than silent corruption. This safety net covers only
 /// exact aliasing; partial overlap (an `output` offset into `input`) is undetectable and remains
