@@ -221,7 +221,7 @@ void apply_ramp(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q3
     return;
   }
 
-  const size_t num_sub_blocks = (samples_to_scale + sub_block_samples - 1) / sub_block_samples;
+  const size_t num_sub_blocks = samples_to_scale / sub_block_samples + (samples_to_scale % sub_block_samples != 0);
   // Both factors are in [0, INT32_MAX], so the difference fits int32 and this is a 32-bit divide.
   // Accumulated rounding drift is erased by landing exactly on q31_end below.
   const int32_t delta = (q31_end - q31_start) / static_cast<int32_t>(num_sub_blocks);
