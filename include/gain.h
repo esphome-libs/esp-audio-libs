@@ -36,29 +36,9 @@ int32_t db_to_q31(float db);
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale,
            size_t samples_to_scale, size_t bytes_per_sample);
 
-/// @brief Applies a gain that ramps linearly from q31_start (exclusive) to q31_end (inclusive).
-///
-/// Implemented as constant-factor sub-blocks, each one apply() call, so the factor steps by
-/// (q31_end - q31_start) / num_sub_blocks at each sub-block boundary. The first sub-block is already
-/// one step past q31_start (q31_start is the level the previous block ended on, so no sample is scaled
-/// by it) and the last sub-block uses exactly q31_end. Pick sub_block_samples so that step is a
-/// fraction of a dB. Integer math only.
-///
-/// May operate in-place when output_buffer == audio_samples.
-/// @param audio_samples Input buffer of interleaved signed samples.
-/// @param output_buffer Output buffer (may alias the input).
-/// @param q31_start Q31 factor the previous block ended on, in [0, INT32_MAX]. Not applied itself.
-/// @param q31_end Q31 factor at the end of the block, in [0, INT32_MAX].
-/// @param samples_to_scale Number of samples (not frames) to scale.
-/// @param sub_block_samples Samples per sub-block. 0 or >= samples_to_scale applies q31_end to the
-///                          whole block.
-/// @param bytes_per_sample Sample width in bytes: 1, 2, 3, or 4.
-void apply_ramp(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_start, int32_t q31_end,
-                size_t samples_to_scale, size_t sub_block_samples, size_t bytes_per_sample);
-
 /// @brief Stateful gain smoother that ramps a Q31 gain toward a target over a fixed sample count.
 ///
-/// The ramp walks a 1 dB grid (steady perceived rate), fills each step linearly via apply_ramp(),
+/// The ramp walks a 1 dB grid (steady perceived rate), fills each step linearly in constant-factor sub-blocks,
 /// and lands exactly on the target. A ramp to or from silence (Q31 0) is a single linear segment.
 /// Retargeting mid-ramp continues from the live value. Integer math only, so safe in an audio task.
 ///

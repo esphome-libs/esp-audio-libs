@@ -208,6 +208,13 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
   }
 }
 
+namespace {
+
+// Applies a gain that ramps linearly from q31_start (exclusive) to q31_end (inclusive), as
+// constant-factor sub-blocks of sub_block_samples each, one apply() call per sub-block. q31_start is
+// the level the previous block ended on, so the first sub-block is already one step past it; the
+// last sub-block uses exactly q31_end. sub_block_samples == 0 or >= samples_to_scale applies q31_end
+// to the whole block. Both factors must be in [0, INT32_MAX]. May operate in place.
 void apply_ramp(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_start, int32_t q31_end,
                 size_t samples_to_scale, size_t sub_block_samples, size_t bytes_per_sample) {
   if (samples_to_scale == 0) {
@@ -235,8 +242,6 @@ void apply_ramp(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q3
     processed += chunk;
   }
 }
-
-namespace {
 
 // Whole 1 dB grid steps strictly between `from` and `target`. Zero is not on the geometric grid
 // (0 * ratio == 0 going up; no finite number of steps reaches 0 going down), so a ramp to or from
