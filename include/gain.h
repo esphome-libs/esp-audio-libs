@@ -41,13 +41,15 @@ int32_t db_reduction_to_q31(uint8_t db);
 ///                  values are not supported.
 /// @param samples_to_scale Number of samples (not frames) to scale.
 /// @param bytes_per_sample Sample width in bytes: 1, 2, 3, or 4. Other values are a no-op.
-void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale,
-           size_t samples_to_scale, size_t bytes_per_sample);
+void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale, size_t samples_to_scale,
+           size_t bytes_per_sample);
 
 /// @brief Stateful gain smoother that ramps a Q31 gain toward a target over a fixed sample count.
 ///
 /// The ramp walks a 1 dB grid (steady perceived rate), fills each step linearly in constant-factor sub-blocks,
-/// and lands exactly on the target. A ramp to or from silence (Q31 0) is a single linear segment.
+/// and lands exactly on the target. Silence (Q31 0) is not on the grid: a fade to silence steps down to
+/// -100 dB and then runs one more segment, the same length as a 1 dB step, linearly to 0. A fade in from
+/// silence (or from anywhere below -100 dB) mirrors that: one linear segment up to -100 dB, then 1 dB steps.
 /// Retargeting mid-ramp continues from the live value. Integer math only, so safe in an audio task.
 ///
 /// Default-constructed: settled at unity.
@@ -55,10 +57,11 @@ class GainRamp {
  public:
   /// @brief Points the ramp at a new target, starting from the live value.
   ///
-  /// Same target as already in effect is a no-op. ramp_samples == 0, or too few samples to give each
-  /// 1 dB step one sample, changes immediately. Small and large jumps both take about ramp_samples:
-  /// the length is rounded down to a whole number of 1 dB steps, so the ramp can settle up to
-  /// (steps - 1) samples early.
+  /// Settled at the target already is a no-op. While a ramp is in flight, calling with the same target
+  /// reschedules it: the remaining distance is covered in ramp_samples from now. ramp_samples == 0, or
+  /// too few samples to give each 1 dB step one sample, changes immediately. Small and large jumps both
+  /// take about ramp_samples: the length is rounded down to a whole number of segments, so the ramp
+  /// can settle up to (segments - 1) samples early.
   ///
   /// @param target_q31 Target Q31 gain in [0, INT32_MAX].
   /// @param ramp_samples Ramp length in samples (interleaved count, matching process()).
@@ -66,10 +69,9 @@ class GainRamp {
 
   /// @brief set_target() with the target given as an integer dB reduction below unity.
   ///
-  /// 0 is unity; 173 and above are silence. See db_reduction_to_q31(). Integer math only.
-  void set_target_db_reduction(uint8_t db, uint32_t ramp_samples) {
-    this->set_target(db_reduction_to_q31(db), ramp_samples);
-  }
+  /// 0 is unity; 173 and above are silence. See db_reduction_to_q31(). Integer math only. The last
+  /// conversion is cached, so calling every block with an unchanged level costs one compare.
+  void set_target_db_reduction(uint8_t db, uint32_t ramp_samples);
 
   /// @brief Applies the ramp to a block in place, advancing the live value toward the target.
   ///
@@ -91,9 +93,10 @@ class GainRamp {
   int32_t current_q31_{INT32_MAX};
   int32_t target_q31_{INT32_MAX};
   int32_t seg_target_q31_{INT32_MAX};  ///< End of the 1 dB segment in progress.
-  int32_t seg_delta_per_sample_{0};    ///< Q31 change per sample within the segment in progress.
   uint32_t samples_remaining_{0};      ///< 0 means settled.
   uint32_t samples_per_step_{0};       ///< Samples per 1 dB segment.
+  uint8_t last_db_{0};                 ///< Last dB passed to set_target_db_reduction().
+  int32_t last_db_q31_{INT32_MAX};     ///< db_reduction_to_q31(last_db_).
 };
 
 }  // namespace gain

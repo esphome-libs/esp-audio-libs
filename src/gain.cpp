@@ -36,8 +36,8 @@ int32_t db_reduction_to_q31(uint8_t db) {
   return factor;
 }
 
-void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale,
-           size_t samples_to_scale, size_t bytes_per_sample) {
+void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale, size_t samples_to_scale,
+           size_t bytes_per_sample) {
   // Each case shifts the input sample into Q31 form, then performs a Q31×Q31 high-half multiply
   // (`(int64_t)a * (int64_t)b >> 32`). This is a single instruction on ESP32/other platforms.
   // This yields a Q30 result in int32. That int32 sample is shifted to restore the original bit
@@ -60,14 +60,10 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
         const int32_t s1 = internal::unpack_to_q31<1>(audio_samples + i + 1);
         const int32_t s2 = internal::unpack_to_q31<1>(audio_samples + i + 2);
         const int32_t s3 = internal::unpack_to_q31<1>(audio_samples + i + 3);
-        const int32_t high0 =
-            static_cast<int32_t>((static_cast<int64_t>(s0) * static_cast<int64_t>(q31_scale)) >> 32);
-        const int32_t high1 =
-            static_cast<int32_t>((static_cast<int64_t>(s1) * static_cast<int64_t>(q31_scale)) >> 32);
-        const int32_t high2 =
-            static_cast<int32_t>((static_cast<int64_t>(s2) * static_cast<int64_t>(q31_scale)) >> 32);
-        const int32_t high3 =
-            static_cast<int32_t>((static_cast<int64_t>(s3) * static_cast<int64_t>(q31_scale)) >> 32);
+        const int32_t high0 = static_cast<int32_t>((static_cast<int64_t>(s0) * static_cast<int64_t>(q31_scale)) >> 32);
+        const int32_t high1 = static_cast<int32_t>((static_cast<int64_t>(s1) * static_cast<int64_t>(q31_scale)) >> 32);
+        const int32_t high2 = static_cast<int32_t>((static_cast<int64_t>(s2) * static_cast<int64_t>(q31_scale)) >> 32);
+        const int32_t high3 = static_cast<int32_t>((static_cast<int64_t>(s3) * static_cast<int64_t>(q31_scale)) >> 32);
         out[i] = static_cast<int8_t>((high0 + rounding) >> 23);
         out[i + 1] = static_cast<int8_t>((high1 + rounding) >> 23);
         out[i + 2] = static_cast<int8_t>((high2 + rounding) >> 23);
@@ -75,8 +71,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
       }
       for (; i < samples_to_scale; ++i) {
         const int32_t s = internal::unpack_to_q31<1>(audio_samples + i);
-        const int32_t high =
-            static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
+        const int32_t high = static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
         out[i] = static_cast<int8_t>((high + rounding) >> 23);
       }
       break;
@@ -85,9 +80,8 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
       // 16 bit input shifted left by 16 to reach Q31. The high-half multiply produces s * sf >> 16.
       // Shift right by 15 to recover the 16 bit sample. Rounding term is 1 << 14.
       constexpr int32_t rounding = 1 << 14;
-      const bool aligned = ((reinterpret_cast<uintptr_t>(audio_samples) |
-                             reinterpret_cast<uintptr_t>(output_buffer)) &
-                            0x1) == 0;
+      const bool aligned =
+          ((reinterpret_cast<uintptr_t>(audio_samples) | reinterpret_cast<uintptr_t>(output_buffer)) & 0x1) == 0;
       if (aligned) {
         // Output stores use EAL_MEMCPY (to avoid strict-aliasing UB) with EAL_ASSUME_ALIGNED on
         // `out` (just established by the runtime check above) so each memcpy folds to a single
@@ -119,8 +113,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
         }
         for (; i < samples_to_scale; ++i) {
           const int32_t s = internal::fast_unpack_to_q31<2>(in + i * 2);
-          const int32_t high =
-              static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
+          const int32_t high = static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
           const int16_t r = static_cast<int16_t>((high + rounding) >> 15);
           EAL_MEMCPY(out + i * 2, &r, sizeof(int16_t));
         }
@@ -129,11 +122,9 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
           const uint8_t *p_in = audio_samples + (i * 2);
           uint8_t *p_out = output_buffer + (i * 2);
           const int32_t s = internal::unpack_to_q31<2>(p_in);
-          const int32_t high =
-              static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
+          const int32_t high = static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
           // Round and convert Q30 to Q31 form so pack keeps the right bytes.
-          const int32_t scaled_q31 =
-              static_cast<int32_t>(static_cast<uint32_t>(high + rounding) << 1);
+          const int32_t scaled_q31 = static_cast<int32_t>(static_cast<uint32_t>(high + rounding) << 1);
           internal::pack_q31<2>(scaled_q31, p_out);
         }
       }
@@ -147,8 +138,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
         const uint8_t *p_in = audio_samples + (i * 3);
         uint8_t *p_out = output_buffer + (i * 3);
         const int32_t s = internal::unpack_to_q31<3>(p_in);
-        const int32_t high =
-            static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
+        const int32_t high = static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
         const int32_t scaled = (high + rounding) >> 7;
         p_out[0] = static_cast<uint8_t>(scaled);
         p_out[1] = static_cast<uint8_t>(scaled >> 8);
@@ -161,9 +151,8 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
       // Shift left by 1 to restore Q31. With sf in [0, INT32_MAX] the magnitude of the high half
       // is at most 2^30 (reached at s=INT32_MIN, sf=INT32_MAX), so the shift never overflows.
       // Cast through uint32_t so the shift is well-defined for negative values.
-      const bool aligned = ((reinterpret_cast<uintptr_t>(audio_samples) |
-                             reinterpret_cast<uintptr_t>(output_buffer)) &
-                            0x3) == 0;
+      const bool aligned =
+          ((reinterpret_cast<uintptr_t>(audio_samples) | reinterpret_cast<uintptr_t>(output_buffer)) & 0x3) == 0;
       if (aligned) {
         // Output stores use EAL_MEMCPY (to avoid strict-aliasing UB) with EAL_ASSUME_ALIGNED on
         // `out` (just established by the runtime check above) so each memcpy folds to a single
@@ -195,8 +184,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
         }
         for (; i < samples_to_scale; ++i) {
           const int32_t v = internal::fast_unpack_to_q31<4>(in + i * 4);
-          const int32_t high =
-              static_cast<int32_t>((static_cast<int64_t>(v) * static_cast<int64_t>(q31_scale)) >> 32);
+          const int32_t high = static_cast<int32_t>((static_cast<int64_t>(v) * static_cast<int64_t>(q31_scale)) >> 32);
           const int32_t r = static_cast<int32_t>(static_cast<uint32_t>(high) << 1);
           EAL_MEMCPY(out + i * 4, &r, sizeof(int32_t));
         }
@@ -205,8 +193,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
           const uint8_t *p_in = audio_samples + (i * 4);
           uint8_t *p_out = output_buffer + (i * 4);
           const int32_t s = internal::unpack_to_q31<4>(p_in);
-          const int32_t high =
-              static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
+          const int32_t high = static_cast<int32_t>((static_cast<int64_t>(s) * static_cast<int64_t>(q31_scale)) >> 32);
           const int32_t scaled_q31 = static_cast<int32_t>(static_cast<uint32_t>(high) << 1);
           internal::pack_q31<4>(scaled_q31, p_out);
         }
@@ -251,12 +238,9 @@ void apply_ramp(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q3
   }
 }
 
-// Whole 1 dB grid steps strictly between `from` and `target`. Zero is not on the geometric grid
-// (0 * ratio == 0 going up; no finite number of steps reaches 0 going down), so a ramp to or from
-// silence returns 0 and the caller covers it with the single final linear segment.
+// Whole 1 dB grid steps strictly between `from` and `target`. Both must be nonzero: zero is not on
+// the geometric grid, so ramp_segments() covers silence with a linear segment at the floor.
 uint32_t count_1db_steps(int32_t from, int32_t target) {
-  if (target == 0 || from == 0)
-    return 0;
   const bool down = target < from;
   uint32_t n = 0;
   int32_t x = from;
@@ -271,6 +255,36 @@ uint32_t count_1db_steps(int32_t from, int32_t target) {
     ++n;
   }
   return n;
+}
+
+// Applies step_down_1db n times at compile time.
+constexpr int32_t step_down_n(int32_t x, unsigned n) {
+  return n == 0 ? x : step_down_n(internal::step_down_1db(x), n - 1);
+}
+
+// Grid point where a fade to silence leaves the 1 dB grid: the ramp steps down to here, then one
+// more segment (the same length as a 1 dB step) runs linearly to 0. A fade in from below the floor
+// mirrors it: one linear segment up to the floor, then 1 dB steps.
+constexpr unsigned SILENCE_FLOOR_DB = 100;
+constexpr int32_t SILENCE_FLOOR_Q31 = step_down_n(INT32_MAX, SILENCE_FLOOR_DB);
+static_assert(SILENCE_FLOOR_Q31 > 8, "silence floor must sit above the range where step_up_1db stalls");
+
+// Number of equal-length segments a ramp from `from` to `target` takes: one per whole 1 dB step,
+// one to land exactly on the target, plus the linear segment at the silence floor when the ramp
+// starts below it or ends at 0.
+uint32_t ramp_segments(int32_t from, int32_t target) {
+  if (target < from) {
+    if (target != 0)
+      return count_1db_steps(from, target) + 1;
+    if (from <= SILENCE_FLOOR_Q31)
+      return 1;                                           // Already at or below the floor: linear to 0.
+    return count_1db_steps(from, SILENCE_FLOOR_Q31) + 2;  // Land on the floor, then linear to 0.
+  }
+  if (from >= SILENCE_FLOOR_Q31)
+    return count_1db_steps(from, target) + 1;
+  if (target <= SILENCE_FLOOR_Q31)
+    return 1;                                             // Whole ramp is below the floor: linear.
+  return count_1db_steps(SILENCE_FLOOR_Q31, target) + 2;  // Linear to the floor, then 1 dB steps.
 }
 
 // Largest Q31 change per constant-factor sub-block: one eighth of a 1 dB step from unity. Keeps the
@@ -292,17 +306,17 @@ inline size_t sub_block_for_segment(uint32_t samples, uint32_t span_q31) {
 }  // namespace
 
 void GainRamp::set_target(int32_t target_q31, uint32_t ramp_samples) {
-  if (target_q31 == this->target_q31_) {
-    return;  // Already heading there.
+  if (target_q31 == this->target_q31_ && this->samples_remaining_ == 0) {
+    return;  // Already settled there.
   }
   this->target_q31_ = target_q31;
 
   this->samples_per_step_ = 0;
   if (ramp_samples > 0 && target_q31 != this->current_q31_) {
-    // One segment per whole 1 dB step plus a final segment that lands exactly on target_q31.
-    const uint32_t steps = count_1db_steps(this->current_q31_, target_q31) + 1;
+    const uint32_t steps = ramp_segments(this->current_q31_, target_q31);
     this->samples_per_step_ = ramp_samples / steps;
     // Exact multiple of samples_per_step so the final segment ends as samples_remaining hits 0.
+    // Also what makes process() start a fresh segment on its next call after a retarget.
     this->samples_remaining_ = this->samples_per_step_ * steps;
   }
   if (this->samples_per_step_ == 0) {
@@ -310,6 +324,14 @@ void GainRamp::set_target(int32_t target_q31, uint32_t ramp_samples) {
     this->current_q31_ = target_q31;
     this->samples_remaining_ = 0;
   }
+}
+
+void GainRamp::set_target_db_reduction(uint8_t db, uint32_t ramp_samples) {
+  if (db != this->last_db_) {
+    this->last_db_ = db;
+    this->last_db_q31_ = db_reduction_to_q31(db);
+  }
+  this->set_target(this->last_db_q31_, ramp_samples);
 }
 
 void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples) {
@@ -321,19 +343,19 @@ void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t sampl
     uint32_t samples_left_in_step = this->samples_remaining_ % this->samples_per_step_;
     if (samples_left_in_step == 0) {
       // Segment boundary: the last segment ends on the target, earlier ones one 1 dB step closer.
+      // A fade to silence stops stepping at the floor (the last segment is linear from there), and
+      // a fade in from below the floor first goes linearly to the floor. See ramp_segments().
       samples_left_in_step = this->samples_per_step_;
       if (this->samples_remaining_ <= this->samples_per_step_) {
         this->seg_target_q31_ = this->target_q31_;
       } else if (this->target_q31_ < this->current_q31_) {
-        this->seg_target_q31_ = internal::step_down_1db(this->current_q31_);
+        const int32_t next = internal::step_down_1db(this->current_q31_);
+        this->seg_target_q31_ = (this->target_q31_ == 0 && next < SILENCE_FLOOR_Q31) ? SILENCE_FLOOR_Q31 : next;
+      } else if (this->current_q31_ < SILENCE_FLOOR_Q31) {
+        this->seg_target_q31_ = SILENCE_FLOOR_Q31;
       } else {
         this->seg_target_q31_ = internal::step_up_1db(this->current_q31_);
       }
-      // Per-sample slope for the segment: one 32-bit divide here instead of a 64-bit divide per
-      // chunk. Truncation drift is under samples_per_step_ Q31 units and the final chunk of the
-      // segment lands exactly on seg_target_q31_ anyway.
-      this->seg_delta_per_sample_ =
-          (this->seg_target_q31_ - this->current_q31_) / static_cast<int32_t>(this->samples_per_step_);
     }
 
     const uint32_t chunk = std::min(samples, samples_left_in_step);
@@ -342,10 +364,15 @@ void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t sampl
         static_cast<uint32_t>(this->seg_target_q31_ > this->current_q31_ ? this->seg_target_q31_ - this->current_q31_
                                                                          : this->current_q31_ - this->seg_target_q31_);
     const size_t sub_block_samples = sub_block_for_segment(samples_left_in_step, seg_span_abs);
-    // |slope| <= |span| / samples_per_step_ and chunk < samples_per_step_, so the product fits int32.
-    const int32_t chunk_end = (chunk >= samples_left_in_step)
-                                  ? this->seg_target_q31_
-                                  : this->current_q31_ + this->seg_delta_per_sample_ * static_cast<int32_t>(chunk);
+    // Interpolate the remaining span over the remaining samples, exactly, from the live value. No
+    // per-sample slope to truncate, so quiet or very long segments never stall, and the last chunk
+    // of the segment lands exactly on seg_target_q31_.
+    const int32_t chunk_end =
+        (chunk >= samples_left_in_step)
+            ? this->seg_target_q31_
+            : this->current_q31_ +
+                  static_cast<int32_t>(static_cast<int64_t>(this->seg_target_q31_ - this->current_q31_) *
+                                       static_cast<int64_t>(chunk) / samples_left_in_step);
     apply_ramp(buffer, buffer, this->current_q31_, chunk_end, chunk, sub_block_samples, bytes_per_sample);
 
     this->current_q31_ = chunk_end;
