@@ -92,9 +92,9 @@ class GainRamp {
   int32_t current_q31_{INT32_MAX};
   int32_t target_q31_{INT32_MAX};
   int32_t seg_target_q31_{INT32_MAX};  ///< End of the 1 dB segment in progress.
+  int32_t seg_delta_per_sample_{0};    ///< Q31 change per sample within the segment in progress.
   uint32_t samples_remaining_{0};      ///< 0 means settled.
   uint32_t samples_per_step_{0};       ///< Samples per 1 dB segment.
-  int8_t direction_{0};                ///< +1 louder, -1 quieter.
 };
 
 }  // namespace gain

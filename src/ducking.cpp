@@ -22,15 +22,15 @@ void set_target(DuckingState &state, uint8_t decibel_reduction, uint32_t transit
   if (decibel_reduction > MAX_DB_REDUCTION)
     decibel_reduction = MAX_DB_REDUCTION;
 
-  if (state.target_db_reduction == decibel_reduction)
+  if (state.target_db_reduction_ == decibel_reduction)
     return;
 
-  state.target_db_reduction = decibel_reduction;
-  state.ramp.set_target(db_reduction_to_q31(decibel_reduction), transition_samples);
+  state.target_db_reduction_ = decibel_reduction;
+  state.ramp_.set_target(db_reduction_to_q31(decibel_reduction), transition_samples);
 }
 
 void apply(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples, DuckingState &state) {
-  state.ramp.process(buffer, bytes_per_sample, samples);
+  state.ramp_.process(buffer, bytes_per_sample, samples);
 }
 
 }  // namespace ducking

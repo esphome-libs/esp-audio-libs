@@ -14,10 +14,22 @@ constexpr uint8_t MAX_DB_REDUCTION = 50;
 /// @brief Mutable ducking state for one audio stream.
 ///
 /// Create one per stream (defaults: not ducked). Call set_target() to schedule a level change, then
-/// apply() on each block. Only target_db_reduction is meant to be read.
-struct DuckingState {
-  uint8_t target_db_reduction{0};  ///< Attenuation in dB that set_target() is moving toward.
-  gain::GainRamp ramp{};           ///< Carries the live level and the transition.
+/// apply() on each block. Only set_target() and apply() modify the state; the accessors are read-only.
+class DuckingState {
+ public:
+  /// @brief Attenuation in dB that set_target() is moving toward or settled at.
+  uint8_t target_db_reduction() const { return this->target_db_reduction_; }
+  /// @brief Live Q31 gain factor. INT32_MAX is unity (0 dB).
+  int32_t current_q31() const { return this->ramp_.current_q31(); }
+  /// @brief True while a transition is in progress.
+  bool is_ramping() const { return this->ramp_.is_ramping(); }
+
+ private:
+  friend void set_target(DuckingState &state, uint8_t decibel_reduction, uint32_t transition_samples);
+  friend void apply(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples, DuckingState &state);
+
+  uint8_t target_db_reduction_{0};
+  gain::GainRamp ramp_{};
 };
 
 /// @brief Schedules a new ducking level, optionally ramped over a number of samples.

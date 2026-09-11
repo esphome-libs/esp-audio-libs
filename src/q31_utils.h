@@ -114,7 +114,7 @@ constexpr uint64_t RATIO_DOWN_1DB_Q32 = 3827893632ULL;  // 2 * round(10^(-1/20) 
 constexpr uint64_t RATIO_UP_1DB_Q30 = 1204758142ULL;    // round(10^(1/20) * 2^30)
 
 /// @brief One 1 dB step quieter. x must be >= 0.
-inline int32_t step_down_1db(int32_t x) {
+constexpr int32_t step_down_1db(int32_t x) {
   return static_cast<int32_t>((static_cast<uint64_t>(x) * RATIO_DOWN_1DB_Q32) >> 32);
 }
 
