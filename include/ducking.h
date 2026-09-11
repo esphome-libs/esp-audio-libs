@@ -42,6 +42,7 @@ class DuckingState {
 /// @param decibel_reduction Target attenuation in dB; clamped to [0, MAX_DB_REDUCTION].
 /// @param transition_samples Length of the ramp in samples (per channel-interleaved sample count
 ///                           is fine as long as it matches what is passed to apply()). 0 = instant.
+///                           Rounded down to a whole number of 1 dB steps, see gain::GainRamp.
 void set_target(DuckingState &state, uint8_t decibel_reduction, uint32_t transition_samples);
 
 /// @brief Applies the current ducking attenuation to a block of interleaved PCM samples in place.

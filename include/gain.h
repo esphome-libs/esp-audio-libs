@@ -36,16 +36,18 @@ int32_t db_to_q31(float db);
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale,
            size_t samples_to_scale, size_t bytes_per_sample);
 
-/// @brief Applies a gain that ramps linearly from q31_start to q31_end across the block.
+/// @brief Applies a gain that ramps linearly from q31_start (exclusive) to q31_end (inclusive).
 ///
 /// Implemented as constant-factor sub-blocks, each one apply() call, so the factor steps by
-/// (q31_end - q31_start) / num_sub_blocks at each sub-block boundary. Pick sub_block_samples so that
-/// step is a fraction of a dB. The last sub-block uses exactly q31_end. Integer math only.
+/// (q31_end - q31_start) / num_sub_blocks at each sub-block boundary. The first sub-block is already
+/// one step past q31_start (q31_start is the level the previous block ended on, so no sample is scaled
+/// by it) and the last sub-block uses exactly q31_end. Pick sub_block_samples so that step is a
+/// fraction of a dB. Integer math only.
 ///
 /// May operate in-place when output_buffer == audio_samples.
 /// @param audio_samples Input buffer of interleaved signed samples.
 /// @param output_buffer Output buffer (may alias the input).
-/// @param q31_start Q31 factor at the start of the block, in [0, INT32_MAX].
+/// @param q31_start Q31 factor the previous block ended on, in [0, INT32_MAX]. Not applied itself.
 /// @param q31_end Q31 factor at the end of the block, in [0, INT32_MAX].
 /// @param samples_to_scale Number of samples (not frames) to scale.
 /// @param sub_block_samples Samples per sub-block. 0 or >= samples_to_scale applies q31_end to the
@@ -66,7 +68,9 @@ class GainRamp {
   /// @brief Points the ramp at a new target, starting from the live value.
   ///
   /// Same target as already in effect is a no-op. ramp_samples == 0, or too few samples to give each
-  /// 1 dB step one sample, changes immediately. Small and large jumps both take ramp_samples.
+  /// 1 dB step one sample, changes immediately. Small and large jumps both take about ramp_samples:
+  /// the length is rounded down to a whole number of 1 dB steps, so the ramp can settle up to
+  /// (steps - 1) samples early.
   ///
   /// @param target_q31 Target Q31 gain in [0, INT32_MAX].
   /// @param ramp_samples Ramp length in samples (interleaved count, matching process()).
