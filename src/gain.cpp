@@ -28,6 +28,14 @@ int32_t db_to_q31(float db) {
   return static_cast<int32_t>(scaled);
 }
 
+int32_t db_reduction_to_q31(uint8_t db) {
+  int32_t factor = INT32_MAX;  // 0 dB = unity gain
+  for (uint8_t i = 0; i < db && factor > 0; ++i) {
+    factor = internal::step_down_1db(factor);
+  }
+  return factor;
+}
+
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale,
            size_t samples_to_scale, size_t bytes_per_sample) {
   // Each case shifts the input sample into Q31 form, then performs a Q31×Q31 high-half multiply

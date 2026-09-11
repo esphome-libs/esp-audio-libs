@@ -14,6 +14,14 @@ namespace gain {
 /// @return Q31 scale factor in the range [0, INT32_MAX].
 int32_t db_to_q31(float db);
 
+/// @brief Converts an integer dB reduction below unity to a Q31 scale factor. Integer math only.
+///
+/// Walks the same 1 dB grid GainRamp steps along, so the result is exactly a grid point. 0 is unity
+/// (INT32_MAX); 173 and above are silence (0), where the grid bottoms out.
+/// @param db Attenuation in dB.
+/// @return Q31 scale factor in the range [0, INT32_MAX].
+int32_t db_reduction_to_q31(uint8_t db);
+
 /// @brief Multiplies each sample by a Q31 scale factor in [0, INT32_MAX]. Cannot amplify.
 ///
 /// Sample format: signed PCM, little-endian for multi-byte widths, interleaved across channels.
@@ -55,6 +63,13 @@ class GainRamp {
   /// @param target_q31 Target Q31 gain in [0, INT32_MAX].
   /// @param ramp_samples Ramp length in samples (interleaved count, matching process()).
   void set_target(int32_t target_q31, uint32_t ramp_samples);
+
+  /// @brief set_target() with the target given as an integer dB reduction below unity.
+  ///
+  /// 0 is unity; 173 and above are silence. See db_reduction_to_q31(). Integer math only.
+  void set_target_db_reduction(uint8_t db, uint32_t ramp_samples) {
+    this->set_target(db_reduction_to_q31(db), ramp_samples);
+  }
 
   /// @brief Applies the ramp to a block in place, advancing the live value toward the target.
   ///
