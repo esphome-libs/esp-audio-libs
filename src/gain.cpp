@@ -1,5 +1,6 @@
 #include "gain.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -204,6 +205,150 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
       }
       break;
     }
+  }
+}
+
+void apply_ramp(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_start, int32_t q31_end,
+                size_t samples_to_scale, size_t sub_block_samples, size_t bytes_per_sample) {
+  if (samples_to_scale == 0) {
+    return;
+  }
+  // Constant factor, or the whole block fits in one sub-block: apply q31_end to all of it.
+  if (q31_start == q31_end || sub_block_samples == 0 || sub_block_samples >= samples_to_scale) {
+    apply(audio_samples, output_buffer, q31_end, samples_to_scale, bytes_per_sample);
+    return;
+  }
+
+  const size_t num_sub_blocks = (samples_to_scale + sub_block_samples - 1) / sub_block_samples;
+  // Both factors are in [0, INT32_MAX], so the difference fits int32 and this is a 32-bit divide.
+  // Accumulated rounding drift is erased by landing exactly on q31_end below.
+  const int32_t delta = (q31_end - q31_start) / static_cast<int32_t>(num_sub_blocks);
+
+  int32_t factor = q31_start;
+  size_t processed = 0;
+  for (size_t k = 0; k < num_sub_blocks; ++k) {
+    const size_t chunk = std::min(sub_block_samples, samples_to_scale - processed);
+    // Each sub-block holds the level reached by its end; the last one lands exactly on q31_end.
+    factor = (k + 1 == num_sub_blocks) ? q31_end : (factor + delta);
+    apply(audio_samples + processed * bytes_per_sample, output_buffer + processed * bytes_per_sample, factor, chunk,
+          bytes_per_sample);
+    processed += chunk;
+  }
+}
+
+namespace {
+
+// Whole 1 dB grid steps strictly between `from` and `target`. Zero is not on the geometric grid
+// (0 * ratio == 0 going up; no finite number of steps reaches 0 going down), so a ramp to or from
+// silence returns 0 and the caller covers it with the single final linear segment.
+uint32_t count_1db_steps(int32_t from, int32_t target, int8_t direction) {
+  if (target == 0 || from == 0)
+    return 0;
+  uint32_t n = 0;
+  int32_t x = from;
+  for (;;) {
+    const int32_t next = (direction < 0) ? internal::step_down_1db(x) : internal::step_up_1db(x);
+    const bool reached = (direction < 0) ? (next <= target) : (next >= target);
+    const bool no_progress = (direction < 0) ? (next >= x) : (next <= x);
+    if (reached || no_progress)
+      break;
+    x = next;
+    ++n;
+  }
+  return n;
+}
+
+// Largest Q31 change per constant-factor sub-block: one eighth of a 1 dB step from unity,
+// (INT32_MAX - step_down_1db(INT32_MAX)) / 8. Keeps the wide to/from-silence segment as smooth as
+// the 1 dB grid.
+constexpr uint32_t MAX_Q31_PER_SUB_BLOCK = 29192103;
+
+// Sub-block length for a segment: 8 sub-steps, or more when the span exceeds 1 dB. Floored at 8
+// samples so apply()'s 4-wide unrolled loop is always reached on very fast ramps.
+inline size_t sub_block_for_segment(uint32_t samples, uint32_t span_q31) {
+  constexpr uint32_t SUB_STEPS_PER_SEGMENT = 8;
+  constexpr uint32_t MIN_SUB_BLOCK_SAMPLES = 8;
+  const uint32_t by_span = span_q31 / MAX_Q31_PER_SUB_BLOCK + 1;
+  const uint32_t sub_steps = by_span > SUB_STEPS_PER_SEGMENT ? by_span : SUB_STEPS_PER_SEGMENT;
+  const uint32_t sub = samples / sub_steps;
+  return sub < MIN_SUB_BLOCK_SAMPLES ? MIN_SUB_BLOCK_SAMPLES : sub;
+}
+
+}  // namespace
+
+void GainRamp::set_target(int32_t target_q31, uint32_t ramp_samples) {
+  if (target_q31 == this->target_q31_) {
+    return;  // Already heading there.
+  }
+  this->target_q31_ = target_q31;
+
+  if (ramp_samples == 0 || target_q31 == this->current_q31_) {
+    this->current_q31_ = target_q31;
+    this->samples_remaining_ = 0;
+    return;
+  }
+
+  this->direction_ = (target_q31 > this->current_q31_) ? 1 : -1;
+  // One segment per whole 1 dB step plus a final segment that lands exactly on target_q31.
+  const uint32_t steps = count_1db_steps(this->current_q31_, target_q31, this->direction_) + 1;
+  this->samples_per_step_ = ramp_samples / steps;
+  if (this->samples_per_step_ == 0) {
+    // Too short to give each step a sample: jump.
+    this->current_q31_ = target_q31;
+    this->samples_remaining_ = 0;
+    return;
+  }
+  // Exact multiple of samples_per_step so the final segment ends as samples_remaining hits 0.
+  this->samples_remaining_ = this->samples_per_step_ * steps;
+}
+
+void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples) {
+  if (samples == 0) {
+    return;
+  }
+  // Safety guard: a ramp in progress must have a nonzero step size.
+  if (this->samples_remaining_ > 0 && this->samples_per_step_ == 0) {
+    this->current_q31_ = this->target_q31_;
+    this->samples_remaining_ = 0;
+  }
+
+  while (samples > 0 && this->samples_remaining_ > 0) {
+    uint32_t samples_left_in_step = this->samples_remaining_ % this->samples_per_step_;
+    if (samples_left_in_step == 0) {
+      // Segment boundary: the last segment ends on the target, earlier ones one 1 dB step closer.
+      samples_left_in_step = this->samples_per_step_;
+      const bool final_step = this->samples_remaining_ <= this->samples_per_step_;
+      this->seg_target_q31_ = final_step               ? this->target_q31_
+                              : (this->direction_ < 0) ? internal::step_down_1db(this->current_q31_)
+                                                       : internal::step_up_1db(this->current_q31_);
+    }
+
+    const uint32_t chunk = std::min(samples, samples_left_in_step);
+    // Span and samples left shrink together within a segment, so the sub-block step stays uniform.
+    const uint32_t seg_span_abs =
+        static_cast<uint32_t>(this->seg_target_q31_ > this->current_q31_ ? this->seg_target_q31_ - this->current_q31_
+                                                                         : this->current_q31_ - this->seg_target_q31_);
+    const size_t sub_block_samples = sub_block_for_segment(samples_left_in_step, seg_span_abs);
+    int32_t chunk_end;
+    if (chunk >= samples_left_in_step) {
+      chunk_end = this->seg_target_q31_;
+    } else {
+      const int64_t span = static_cast<int64_t>(this->seg_target_q31_) - static_cast<int64_t>(this->current_q31_);
+      chunk_end =
+          static_cast<int32_t>(static_cast<int64_t>(this->current_q31_) +
+                               (span * static_cast<int64_t>(chunk)) / static_cast<int64_t>(samples_left_in_step));
+    }
+    apply_ramp(buffer, buffer, this->current_q31_, chunk_end, chunk, sub_block_samples, bytes_per_sample);
+
+    this->current_q31_ = chunk_end;
+    buffer += static_cast<size_t>(chunk) * bytes_per_sample;
+    this->samples_remaining_ -= chunk;
+    samples -= chunk;
+  }
+
+  // Settled tail: one constant factor, skipping the unity no-op.
+  if (samples > 0 && this->current_q31_ != INT32_MAX) {
+    apply(buffer, buffer, this->current_q31_, samples, bytes_per_sample);
   }
 }
 

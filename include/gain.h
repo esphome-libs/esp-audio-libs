@@ -36,5 +36,66 @@ int32_t db_to_q31(float db);
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale,
            size_t samples_to_scale, size_t bytes_per_sample);
 
+/// @brief Applies a gain that ramps linearly from q31_start to q31_end across the block.
+///
+/// Implemented as constant-factor sub-blocks, each one apply() call, so the factor steps by
+/// (q31_end - q31_start) / num_sub_blocks at each sub-block boundary. Pick sub_block_samples so that
+/// step is a fraction of a dB. The last sub-block uses exactly q31_end. Integer math only.
+///
+/// May operate in-place when output_buffer == audio_samples.
+/// @param audio_samples Input buffer of interleaved signed samples.
+/// @param output_buffer Output buffer (may alias the input).
+/// @param q31_start Q31 factor at the start of the block, in [0, INT32_MAX].
+/// @param q31_end Q31 factor at the end of the block, in [0, INT32_MAX].
+/// @param samples_to_scale Number of samples (not frames) to scale.
+/// @param sub_block_samples Samples per sub-block. 0 or >= samples_to_scale applies q31_end to the
+///                          whole block.
+/// @param bytes_per_sample Sample width in bytes: 1, 2, 3, or 4.
+void apply_ramp(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_start, int32_t q31_end,
+                size_t samples_to_scale, size_t sub_block_samples, size_t bytes_per_sample);
+
+/// @brief Stateful gain smoother that ramps a Q31 gain toward a target over a fixed sample count.
+///
+/// The ramp walks a 1 dB grid (steady perceived rate), fills each step linearly via apply_ramp(),
+/// and lands exactly on the target. A ramp to or from silence (Q31 0) is a single linear segment.
+/// Retargeting mid-ramp continues from the live value. Integer math only, so safe in an audio task.
+///
+/// Default-constructed: settled at unity.
+class GainRamp {
+ public:
+  /// @brief Points the ramp at a new target, starting from the live value.
+  ///
+  /// Same target as already in effect is a no-op. ramp_samples == 0, or too few samples to give each
+  /// 1 dB step one sample, changes immediately. Small and large jumps both take ramp_samples.
+  ///
+  /// @param target_q31 Target Q31 gain in [0, INT32_MAX].
+  /// @param ramp_samples Ramp length in samples (interleaved count, matching process()).
+  void set_target(int32_t target_q31, uint32_t ramp_samples);
+
+  /// @brief Applies the ramp to a block in place, advancing the live value toward the target.
+  ///
+  /// Any tail beyond the ramp is scaled by the settled target. Settled at unity is a no-op.
+  ///
+  /// @param buffer Interleaved samples to scale in place.
+  /// @param bytes_per_sample Sample width in bytes: 1, 2, 3, or 4.
+  /// @param samples Number of samples (not frames) in the buffer.
+  void process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples);
+
+  /// @brief Live Q31 gain. INT32_MAX is unity.
+  int32_t current_q31() const { return this->current_q31_; }
+  /// @brief Q31 gain the ramp is heading to or settled at.
+  int32_t target_q31() const { return this->target_q31_; }
+  /// @brief True while a ramp is in progress.
+  bool is_ramping() const { return this->samples_remaining_ > 0; }
+
+ private:
+  int32_t current_q31_{INT32_MAX};
+  int32_t target_q31_{INT32_MAX};
+  int32_t seg_target_q31_{INT32_MAX};  ///< End of the 1 dB segment in progress.
+  uint32_t samples_remaining_{0};      ///< 0 means settled.
+  uint32_t samples_per_step_{0};       ///< Samples per 1 dB segment.
+  int8_t direction_{0};                ///< +1 louder, -1 quieter.
+};
+
 }  // namespace gain
 }  // namespace esp_audio_libs

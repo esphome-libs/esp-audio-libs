@@ -108,5 +108,21 @@ template<size_t Bps> inline void fast_pack_q31(int32_t sample, uint8_t *data) {
   }
 }
 
+/// 1 dB step ratios in integer fixed-point (no FPU). Down is Q32 (>>32); up exceeds 1 so it is Q30
+/// (>>30). The 32x32 -> high-32 multiply is a single MULUH (Xtensa) / MULHU (RISC-V).
+constexpr uint64_t RATIO_DOWN_1DB_Q32 = 3827893632ULL;  // 2 * round(10^(-1/20) * 2^31)
+constexpr uint64_t RATIO_UP_1DB_Q30 = 1204758142ULL;    // round(10^(1/20) * 2^30)
+
+/// @brief One 1 dB step quieter. x must be >= 0.
+inline int32_t step_down_1db(int32_t x) {
+  return static_cast<int32_t>((static_cast<uint64_t>(x) * RATIO_DOWN_1DB_Q32) >> 32);
+}
+
+/// @brief One 1 dB step louder, clamped at unity. x must be >= 0.
+inline int32_t step_up_1db(int32_t x) {
+  const uint64_t next = (static_cast<uint64_t>(x) * RATIO_UP_1DB_Q30) >> 30;
+  return next >= static_cast<uint64_t>(INT32_MAX) ? INT32_MAX : static_cast<int32_t>(next);
+}
+
 }  // namespace internal
 }  // namespace esp_audio_libs
