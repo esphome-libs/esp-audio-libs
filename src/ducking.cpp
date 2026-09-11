@@ -18,19 +18,15 @@ int32_t db_reduction_to_q31(uint8_t db) {
 
 }  // namespace
 
-void set_target(DuckingState &state, uint8_t decibel_reduction, uint32_t transition_samples) {
+void Ducker::set_target(uint8_t decibel_reduction, uint32_t transition_samples) {
   if (decibel_reduction > MAX_DB_REDUCTION)
     decibel_reduction = MAX_DB_REDUCTION;
 
-  if (state.target_db_reduction_ == decibel_reduction)
+  if (this->target_db_reduction_ == decibel_reduction)
     return;
 
-  state.target_db_reduction_ = decibel_reduction;
-  state.ramp_.set_target(db_reduction_to_q31(decibel_reduction), transition_samples);
-}
-
-void apply(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples, DuckingState &state) {
-  state.ramp_.process(buffer, bytes_per_sample, samples);
+  this->target_db_reduction_ = decibel_reduction;
+  this->ramp_.set_target(db_reduction_to_q31(decibel_reduction), transition_samples);
 }
 
 }  // namespace ducking
