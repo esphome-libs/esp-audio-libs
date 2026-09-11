@@ -8,9 +8,6 @@
 namespace esp_audio_libs {
 namespace ducking {
 
-/// @brief Largest dB reduction supported by Ducker::set_target(). Larger requests are clamped here.
-constexpr uint8_t MAX_DB_REDUCTION = 50;
-
 /// @brief Ramped dB attenuation for one audio stream: a gain::GainRamp that speaks integer dB.
 ///
 /// Create one per stream (default: not ducked). Call set_target() to schedule a level change, then
@@ -23,7 +20,8 @@ class Ducker {
   /// linearly. `transition_samples == 0` (or too few for one sample per step) changes immediately.
   /// Same level as already in effect is a no-op, so it is safe to call every block.
   ///
-  /// @param decibel_reduction Target attenuation in dB; clamped to [0, MAX_DB_REDUCTION].
+  /// @param decibel_reduction Target attenuation in dB. 0 is unity; 173 and above are silence
+  ///                          (the integer 1 dB grid reaches Q31 0 there).
   /// @param transition_samples Length of the ramp in samples (interleaved count, matching apply()).
   ///                           0 = instant. Rounded down to a whole number of 1 dB steps, see
   ///                           gain::GainRamp::set_target().
