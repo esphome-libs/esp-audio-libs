@@ -31,7 +31,8 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
 
 /// @brief Ramps a Q31 gain toward a target over a fixed length or at a fixed rate.
 ///
-/// The ramp itself is integer math only; the float dB entry points convert once per call.
+/// The ramp itself is integer math only; the float dB entry points convert once per call. Set the
+/// target when the level changes, not every block: re-asserting it restarts a ramp in flight.
 ///
 /// The ramp walks a 1 dB grid for a steady perceived rate. Fades to silence step down to -100 dB and
 /// then run linearly to 0; fades in from silence mirror that. Default-constructed: settled at unity.
