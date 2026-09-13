@@ -17,3 +17,5 @@ The FLAC, MP3, and WAV decoders, as well as the public DSP functions, were remov
 - DSP functions (esp-dsp's `dsps_biquad_f32`, `dsps_dotprod_f32`, `dsps_add_s16`, `dsps_mulc_s16`): use [esp-dsp](https://github.com/espressif/esp-dsp) directly.
 
 The replacements are not drop-in API-compatible.
+
+The `ducking` namespace (`ducking.h`, `DuckingState`, `ducking::set_target`, `ducking::apply`) was removed in version 4.0.0. Use `gain::GainRamp` from `gain.h` instead: `set_target_db_reduction_over` schedules the ramp and `process` applies it. The replacement is not drop-in API-compatible.
