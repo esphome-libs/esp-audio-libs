@@ -339,6 +339,10 @@ void GainRamp::set_target_db_reduction_over(uint8_t db, uint32_t ramp_samples) {
   this->set_target_over(db_reduction_to_q31(db), ramp_samples);
 }
 
+void GainRamp::set_target_db_over(float db, uint32_t ramp_samples) {
+  this->set_target_over(db_to_q31(db), ramp_samples);
+}
+
 void GainRamp::set_target_at_rate(int32_t target_q31, uint32_t samples_per_db) {
   if (target_q31 == this->target_q31_ && this->samples_remaining_ == 0) {
     return;  // Already settled there.
@@ -352,6 +356,10 @@ void GainRamp::set_target_at_rate(int32_t target_q31, uint32_t samples_per_db) {
 
 void GainRamp::set_target_db_reduction_at_rate(uint8_t db, uint32_t samples_per_db) {
   this->set_target_at_rate(db_reduction_to_q31(db), samples_per_db);
+}
+
+void GainRamp::set_target_db_at_rate(float db, uint32_t samples_per_db) {
+  this->set_target_at_rate(db_to_q31(db), samples_per_db);
 }
 
 void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples) {

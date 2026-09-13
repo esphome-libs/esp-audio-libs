@@ -29,7 +29,9 @@ int32_t db_reduction_to_q31(uint8_t db);
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale, size_t samples_to_scale,
            size_t bytes_per_sample);
 
-/// @brief Ramps a Q31 gain toward a target over a fixed length or at a fixed rate. Integer math only.
+/// @brief Ramps a Q31 gain toward a target over a fixed length or at a fixed rate.
+///
+/// The ramp itself is integer math only; the float dB entry points convert once per call.
 ///
 /// The ramp walks a 1 dB grid for a steady perceived rate. Fades to silence step down to -100 dB and
 /// then run linearly to 0; fades in from silence mirror that. Default-constructed: settled at unity.
@@ -45,6 +47,9 @@ class GainRamp {
   /// @brief set_target_over() with the target as an integer dB reduction; see db_reduction_to_q31().
   void set_target_db_reduction_over(uint8_t db, uint32_t ramp_samples);
 
+  /// @brief set_target_over() with the target as a signed dB gain (0 is unity); see db_to_q31().
+  void set_target_db_over(float db, uint32_t ramp_samples);
+
   /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) at samples_per_db per 1 dB step.
   ///
   /// For volume changes: the rate is fixed, so every change moves at the same speed regardless of
@@ -54,6 +59,9 @@ class GainRamp {
 
   /// @brief set_target_at_rate() with the target as an integer dB reduction; see db_reduction_to_q31().
   void set_target_db_reduction_at_rate(uint8_t db, uint32_t samples_per_db);
+
+  /// @brief set_target_at_rate() with the target as a signed dB gain (0 is unity); see db_to_q31().
+  void set_target_db_at_rate(float db, uint32_t samples_per_db);
 
   /// @brief Scales a block in place, advancing the ramp. Settled at unity is a no-op.
   /// @param buffer Interleaved samples, same format as apply().
