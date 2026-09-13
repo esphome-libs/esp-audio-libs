@@ -74,13 +74,9 @@ class GainRamp {
   int32_t seg_target_q31_{INT32_MAX};  ///< End of the 1 dB segment in progress.
   uint32_t samples_remaining_{0};      ///< 0 means settled.
   uint32_t samples_per_step_{0};       ///< Samples per 1 dB segment.
-  uint8_t last_db_{0};                 ///< Last dB passed to a set_target_db_reduction_*() call.
-  int32_t last_db_q31_{INT32_MAX};     ///< db_reduction_to_q31(last_db_).
 
   /// @brief Schedules `steps` segments of samples_per_step each toward target_q31; 0 jumps.
   void schedule_(int32_t target_q31, uint32_t samples_per_step, uint32_t steps);
-  /// @brief db_reduction_to_q31() with the last result cached.
-  int32_t db_reduction_q31_(uint8_t db);
 };
 
 }  // namespace gain
