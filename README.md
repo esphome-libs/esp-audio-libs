@@ -18,4 +18,4 @@ The FLAC, MP3, and WAV decoders, as well as the public DSP functions, were remov
 
 The replacements are not drop-in API-compatible.
 
-The `ducking` namespace (`ducking.h`, `DuckingState`, `ducking::set_target`, `ducking::apply`) was removed in version 4.0.0. Use `gain::GainRamp` from `gain.h` instead: `set_target_db_reduction_over` schedules the ramp and `process` applies it. The replacement is not drop-in API-compatible.
+The `ducking` namespace (`ducking.h`, `DuckingState`, `ducking::set_target`, `ducking::apply`) was removed in version 4.0.0. Use `esp_audio_libs::gain::GainRamp` from `gain.h` instead: `set_target_db_reduction_over` schedules the ramp and `process` applies it. The replacement is not drop-in API-compatible.
