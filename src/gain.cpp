@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <atomic>
 #include <cstdint>
 
 #include "compiler.h"
@@ -323,16 +324,46 @@ void GainRamp::schedule_(int32_t target_q31, uint32_t samples_per_step, uint32_t
   this->samples_remaining_ = this->samples_per_step_ * steps;
 }
 
-void GainRamp::set_target_over(int32_t target_q31, uint32_t ramp_samples) {
+void GainRamp::post_request_(int32_t target_q31, uint32_t param, bool at_rate) {
+  // Seqlock writer: odd sequence while the fields are in flux, even once they are consistent.
+  const uint32_t seq = this->request_seq_.load(std::memory_order_relaxed);
+  this->request_seq_.store(seq + 1, std::memory_order_relaxed);
+  std::atomic_thread_fence(std::memory_order_release);
+  this->request_target_.store(target_q31, std::memory_order_relaxed);
+  this->request_param_.store(param, std::memory_order_relaxed);
+  this->request_at_rate_.store(at_rate, std::memory_order_relaxed);
+  this->request_seq_.store(seq + 2, std::memory_order_release);
+}
+
+void GainRamp::take_request_() {
+  // Seqlock reader. Never waits: a request caught mid-write is simply tried again next block, so
+  // process() cannot stall on a lower-priority writer it has preempted.
+  const uint32_t seq = this->request_seq_.load(std::memory_order_acquire);
+  if (seq == this->applied_seq_ || (seq & 1) != 0) {
+    return;
+  }
+  const int32_t target_q31 = this->request_target_.load(std::memory_order_relaxed);
+  const uint32_t param = this->request_param_.load(std::memory_order_relaxed);
+  const bool at_rate = this->request_at_rate_.load(std::memory_order_relaxed);
+  std::atomic_thread_fence(std::memory_order_acquire);
+  if (this->request_seq_.load(std::memory_order_relaxed) != seq) {
+    return;
+  }
+  this->applied_seq_ = seq;
+
   if (target_q31 == this->target_q31_ && this->samples_remaining_ == 0) {
     return;  // Already settled there.
   }
-  if (ramp_samples == 0 || target_q31 == this->current_q31_) {
+  if (param == 0 || target_q31 == this->current_q31_) {
     this->schedule_(target_q31, 0, 0);
     return;
   }
   const uint32_t steps = ramp_segments(this->current_q31_, target_q31);
-  this->schedule_(target_q31, ramp_samples / steps, steps);
+  this->schedule_(target_q31, at_rate ? param : param / steps, steps);
+}
+
+void GainRamp::set_target_over(int32_t target_q31, uint32_t ramp_samples) {
+  this->post_request_(target_q31, ramp_samples, false);
 }
 
 void GainRamp::set_target_db_reduction_over(uint8_t db, uint32_t ramp_samples) {
@@ -344,14 +375,7 @@ void GainRamp::set_target_db_over(float db, uint32_t ramp_samples) {
 }
 
 void GainRamp::set_target_at_rate(int32_t target_q31, uint32_t samples_per_db) {
-  if (target_q31 == this->target_q31_ && this->samples_remaining_ == 0) {
-    return;  // Already settled there.
-  }
-  if (samples_per_db == 0 || target_q31 == this->current_q31_) {
-    this->schedule_(target_q31, 0, 0);
-    return;
-  }
-  this->schedule_(target_q31, samples_per_db, ramp_segments(this->current_q31_, target_q31));
+  this->post_request_(target_q31, samples_per_db, true);
 }
 
 void GainRamp::set_target_db_reduction_at_rate(uint8_t db, uint32_t samples_per_db) {
@@ -363,9 +387,7 @@ void GainRamp::set_target_db_at_rate(float db, uint32_t samples_per_db) {
 }
 
 void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples) {
-  if (samples == 0) {
-    return;
-  }
+  this->take_request_();
   // schedule_() guarantees samples_per_step_ > 0 whenever samples_remaining_ > 0.
   while (samples > 0 && this->samples_remaining_ > 0) {
     uint32_t samples_left_in_step = this->samples_remaining_ % this->samples_per_step_;
@@ -413,6 +435,7 @@ void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t sampl
   if (samples > 0 && this->current_q31_ != INT32_MAX) {
     apply(buffer, buffer, this->current_q31_, samples, bytes_per_sample);
   }
+  this->current_published_.store(this->current_q31_, std::memory_order_relaxed);
 }
 
 }  // namespace gain

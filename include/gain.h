@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <atomic>
+
 namespace esp_audio_libs {
 namespace gain {
 
@@ -34,15 +36,17 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
 /// The ramp itself is integer math only; the float dB entry points convert once per call. Set the
 /// target when the level changes, not every block: re-asserting it restarts a ramp in flight.
 ///
-/// The ramp walks a 1 dB grid for a steady perceived rate. Fades to silence step down to -100 dB and
-/// then run linearly to 0; fades in from silence mirror that. Default-constructed: settled at unity.
+/// Thread safety: one thread may call the set_target_*() methods while another calls process(). The
+/// setters only post a request; process() picks it up at the start of its next call, so a change
+/// lands on a block boundary. Two threads must not call setters concurrently. The getters are safe
+/// from any thread.
 class GainRamp {
  public:
   /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) over ramp_samples in total.
   ///
   /// For ducking: the duration is fixed and the rate follows from the distance. Settled at the target
   /// already is a no-op; a ramp already in flight is rescheduled. A ramp too short to give each 1 dB
-  /// step one sample jumps immediately. ramp_samples counts interleaved samples, as process() does.
+  /// step one sample jumps instead. ramp_samples counts interleaved samples, as process() does.
   void set_target_over(int32_t target_q31, uint32_t ramp_samples);
 
   /// @brief set_target_over() with the target as an integer dB reduction; see db_reduction_to_q31().
@@ -55,7 +59,7 @@ class GainRamp {
   ///
   /// For volume changes: the rate is fixed, so every change moves at the same speed regardless of
   /// distance. Settled at the target already is a no-op; a ramp already in flight is rescheduled.
-  /// 0 jumps immediately. The linear segment to or from silence is also one step long.
+  /// 0 jumps instead. The linear segment to or from silence is also one step long.
   void set_target_at_rate(int32_t target_q31, uint32_t samples_per_db);
 
   /// @brief set_target_at_rate() with the target as an integer dB reduction; see db_reduction_to_q31().
@@ -64,28 +68,47 @@ class GainRamp {
   /// @brief set_target_at_rate() with the target as a signed dB gain (0 is unity); see db_to_q31().
   void set_target_db_at_rate(float db, uint32_t samples_per_db);
 
-  /// @brief Scales a block in place, advancing the ramp. Settled at unity is a no-op.
+  /// @brief Applies any pending request, then scales a block in place, advancing the ramp. Settled
+  /// at unity is a no-op.
   /// @param buffer Interleaved samples, same format as apply().
   /// @param bytes_per_sample 1, 2, 3, or 4.
   /// @param samples Number of samples (not frames).
   void process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples);
 
-  /// @brief Live Q31 gain. INT32_MAX is unity.
-  int32_t current_q31() const { return this->current_q31_; }
-  /// @brief Q31 gain the ramp is heading to or settled at.
-  int32_t target_q31() const { return this->target_q31_; }
-  /// @brief True while a ramp is in progress.
-  bool is_ramping() const { return this->samples_remaining_ > 0; }
+  /// @brief Live Q31 gain as of the last process() call. INT32_MAX is unity.
+  int32_t current_q31() const { return this->current_published_.load(std::memory_order_relaxed); }
+  /// @brief Q31 gain most recently requested.
+  int32_t target_q31() const { return this->request_target_.load(std::memory_order_relaxed); }
+  /// @brief True while the live gain differs from the requested target.
+  bool is_ramping() const { return this->current_q31() != this->target_q31(); }
 
  private:
+  /// @brief Posts a request for process() to apply; at_rate selects the meaning of param.
+  void post_request_(int32_t target_q31, uint32_t param, bool at_rate);
+  /// @brief Applies a newly posted request, if any. Called only by process().
+  void take_request_();
+  /// @brief Schedules `steps` segments of samples_per_step each toward target_q31; 0 jumps.
+  void schedule_(int32_t target_q31, uint32_t samples_per_step, uint32_t steps);
+
+  // Ramp state, owned by process().
   int32_t current_q31_{INT32_MAX};
   int32_t target_q31_{INT32_MAX};
   int32_t seg_target_q31_{INT32_MAX};  ///< End of the 1 dB segment in progress.
   uint32_t samples_remaining_{0};      ///< 0 means settled.
   uint32_t samples_per_step_{0};       ///< Samples per 1 dB segment.
+  uint32_t applied_seq_{0};            ///< request_seq_ of the last request applied.
 
-  /// @brief Schedules `steps` segments of samples_per_step each toward target_q31; 0 jumps.
-  void schedule_(int32_t target_q31, uint32_t samples_per_step, uint32_t steps);
+  std::atomic<int32_t> current_published_{INT32_MAX};  ///< current_q31_ for the getters.
+
+  // Request mailbox: a single-writer seqlock. request_seq_ is odd while a write is in progress.
+  std::atomic<uint32_t> request_seq_{0};
+  std::atomic<int32_t> request_target_{INT32_MAX};
+  std::atomic<uint32_t> request_param_{0};
+  std::atomic<bool> request_at_rate_{false};
+
+  // The mailbox is only ISR- and preemption-safe if these are plain loads and stores, not a lock.
+  static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_BOOL_LOCK_FREE == 2,
+                "GainRamp requires lock-free 32-bit and bool atomics");
 };
 
 }  // namespace gain
