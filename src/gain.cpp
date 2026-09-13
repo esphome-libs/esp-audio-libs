@@ -305,40 +305,68 @@ inline size_t sub_block_for_segment(uint32_t samples, uint32_t span_q31) {
 
 }  // namespace
 
-void GainRamp::set_target(int32_t target_q31, uint32_t ramp_samples) {
-  if (target_q31 == this->target_q31_ && this->samples_remaining_ == 0) {
-    return;  // Already settled there.
-  }
+void GainRamp::schedule_(int32_t target_q31, uint32_t samples_per_step, uint32_t steps) {
   this->target_q31_ = target_q31;
-
-  this->samples_per_step_ = 0;
-  if (ramp_samples > 0 && target_q31 != this->current_q31_) {
-    const uint32_t steps = ramp_segments(this->current_q31_, target_q31);
-    this->samples_per_step_ = ramp_samples / steps;
-    // Exact multiple of samples_per_step so the final segment ends as samples_remaining hits 0.
-    // Also what makes process() start a fresh segment on its next call after a retarget.
-    this->samples_remaining_ = this->samples_per_step_ * steps;
-  }
-  if (this->samples_per_step_ == 0) {
+  this->samples_per_step_ = samples_per_step;
+  if (samples_per_step == 0) {
     // Nothing to ramp, or too short to give each step a sample: jump.
     this->current_q31_ = target_q31;
     this->samples_remaining_ = 0;
+    return;
   }
+  // Exact multiple of samples_per_step so the final segment ends as samples_remaining hits 0.
+  // Also what makes process() start a fresh segment on its next call after a retarget. A rate large
+  // enough to overflow is clamped by shrinking the step so the product still fits and stays exact.
+  if (samples_per_step > UINT32_MAX / steps) {
+    this->samples_per_step_ = UINT32_MAX / steps;
+  }
+  this->samples_remaining_ = this->samples_per_step_ * steps;
 }
 
-void GainRamp::set_target_db_reduction(uint8_t db, uint32_t ramp_samples) {
+int32_t GainRamp::db_reduction_q31_(uint8_t db) {
   if (db != this->last_db_) {
     this->last_db_ = db;
     this->last_db_q31_ = db_reduction_to_q31(db);
   }
-  this->set_target(this->last_db_q31_, ramp_samples);
+  return this->last_db_q31_;
+}
+
+void GainRamp::set_target_over(int32_t target_q31, uint32_t ramp_samples) {
+  if (target_q31 == this->target_q31_ && this->samples_remaining_ == 0) {
+    return;  // Already settled there.
+  }
+  if (ramp_samples == 0 || target_q31 == this->current_q31_) {
+    this->schedule_(target_q31, 0, 0);
+    return;
+  }
+  const uint32_t steps = ramp_segments(this->current_q31_, target_q31);
+  this->schedule_(target_q31, ramp_samples / steps, steps);
+}
+
+void GainRamp::set_target_db_reduction_over(uint8_t db, uint32_t ramp_samples) {
+  this->set_target_over(this->db_reduction_q31_(db), ramp_samples);
+}
+
+void GainRamp::set_target_at_rate(int32_t target_q31, uint32_t samples_per_db) {
+  if (target_q31 == this->target_q31_ && this->samples_remaining_ == 0) {
+    return;  // Already settled there.
+  }
+  if (samples_per_db == 0 || target_q31 == this->current_q31_) {
+    this->schedule_(target_q31, 0, 0);
+    return;
+  }
+  this->schedule_(target_q31, samples_per_db, ramp_segments(this->current_q31_, target_q31));
+}
+
+void GainRamp::set_target_db_reduction_at_rate(uint8_t db, uint32_t samples_per_db) {
+  this->set_target_at_rate(this->db_reduction_q31_(db), samples_per_db);
 }
 
 void GainRamp::process(uint8_t *buffer, uint8_t bytes_per_sample, uint32_t samples) {
   if (samples == 0) {
     return;
   }
-  // set_target() guarantees samples_per_step_ > 0 whenever samples_remaining_ > 0.
+  // schedule_() guarantees samples_per_step_ > 0 whenever samples_remaining_ > 0.
   while (samples > 0 && this->samples_remaining_ > 0) {
     uint32_t samples_left_in_step = this->samples_remaining_ % this->samples_per_step_;
     if (samples_left_in_step == 0) {

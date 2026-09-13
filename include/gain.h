@@ -29,21 +29,31 @@ int32_t db_reduction_to_q31(uint8_t db);
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale, size_t samples_to_scale,
            size_t bytes_per_sample);
 
-/// @brief Ramps a Q31 gain toward a target over a fixed number of samples. Integer math only.
+/// @brief Ramps a Q31 gain toward a target over a fixed length or at a fixed rate. Integer math only.
 ///
 /// The ramp walks a 1 dB grid for a steady perceived rate. Fades to silence step down to -100 dB and
 /// then run linearly to 0; fades in from silence mirror that. Default-constructed: settled at unity.
 class GainRamp {
  public:
-  /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) over ramp_samples.
+  /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) over ramp_samples in total.
   ///
-  /// Settled at the target already is a no-op; a ramp already in flight is rescheduled. A ramp too
-  /// short to give each 1 dB step one sample jumps immediately. ramp_samples counts interleaved
-  /// samples, as process() does.
-  void set_target(int32_t target_q31, uint32_t ramp_samples);
+  /// For ducking: the duration is fixed and the rate follows from the distance. Settled at the target
+  /// already is a no-op; a ramp already in flight is rescheduled. A ramp too short to give each 1 dB
+  /// step one sample jumps immediately. ramp_samples counts interleaved samples, as process() does.
+  void set_target_over(int32_t target_q31, uint32_t ramp_samples);
 
-  /// @brief set_target() with the target as an integer dB reduction; see db_reduction_to_q31().
-  void set_target_db_reduction(uint8_t db, uint32_t ramp_samples);
+  /// @brief set_target_over() with the target as an integer dB reduction; see db_reduction_to_q31().
+  void set_target_db_reduction_over(uint8_t db, uint32_t ramp_samples);
+
+  /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) at samples_per_db per 1 dB step.
+  ///
+  /// For volume changes: the rate is fixed, so every change moves at the same speed regardless of
+  /// distance. Settled at the target already is a no-op; a ramp already in flight is rescheduled.
+  /// 0 jumps immediately. The linear segment to or from silence is also one step long.
+  void set_target_at_rate(int32_t target_q31, uint32_t samples_per_db);
+
+  /// @brief set_target_at_rate() with the target as an integer dB reduction; see db_reduction_to_q31().
+  void set_target_db_reduction_at_rate(uint8_t db, uint32_t samples_per_db);
 
   /// @brief Scales a block in place, advancing the ramp. Settled at unity is a no-op.
   /// @param buffer Interleaved samples, same format as apply().
@@ -64,8 +74,13 @@ class GainRamp {
   int32_t seg_target_q31_{INT32_MAX};  ///< End of the 1 dB segment in progress.
   uint32_t samples_remaining_{0};      ///< 0 means settled.
   uint32_t samples_per_step_{0};       ///< Samples per 1 dB segment.
-  uint8_t last_db_{0};                 ///< Last dB passed to set_target_db_reduction().
+  uint8_t last_db_{0};                 ///< Last dB passed to a set_target_db_reduction_*() call.
   int32_t last_db_q31_{INT32_MAX};     ///< db_reduction_to_q31(last_db_).
+
+  /// @brief Schedules `steps` segments of samples_per_step each toward target_q31; 0 jumps.
+  void schedule_(int32_t target_q31, uint32_t samples_per_step, uint32_t steps);
+  /// @brief db_reduction_to_q31() with the last result cached.
+  int32_t db_reduction_q31_(uint8_t db);
 };
 
 }  // namespace gain
