@@ -38,8 +38,8 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
 ///
 /// Thread safety: one thread may call the set_target_*() methods while another calls process(). The
 /// setters only post a request; process() picks it up at the start of its next call, so a change
-/// lands on a block boundary. Two threads must not call setters concurrently. The getters are safe
-/// from any thread.
+/// lands on a block boundary. Two threads must not call setters concurrently, and no method should
+/// be called from an interrupt. The getters are safe from any thread.
 class GainRamp {
  public:
   /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) over ramp_samples in total.
@@ -105,10 +105,6 @@ class GainRamp {
   std::atomic<int32_t> request_target_{INT32_MAX};
   std::atomic<uint32_t> request_param_{0};
   std::atomic<bool> request_at_rate_{false};
-
-  // The mailbox is only ISR- and preemption-safe if these are plain loads and stores, not a lock.
-  static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_BOOL_LOCK_FREE == 2,
-                "GainRamp requires lock-free 32-bit and bool atomics");
 };
 
 }  // namespace gain
