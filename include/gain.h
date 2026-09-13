@@ -42,7 +42,7 @@ void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_sca
 /// be called from an interrupt. The getters are safe from any thread.
 class GainRamp {
  public:
-  /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) over ramp_samples in total.
+  /// @brief Ramps from the live value to target_q31 (in [0, INT32_MAX]) in at most ramp_samples.
   ///
   /// For ducking: the duration is fixed and the rate follows from the distance. Settled at the target
   /// already is a no-op; a ramp already in flight is rescheduled. A ramp too short to give each 1 dB
