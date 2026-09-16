@@ -4,6 +4,7 @@
 #include <cmath>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 
 #include "compiler.h"
 #include "q31_utils.h"
@@ -39,6 +40,11 @@ int32_t db_reduction_to_q31(uint8_t db) {
 
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale, size_t samples_to_scale,
            size_t bytes_per_sample) {
+  // Silence at every bit depth (8 bit is int8), and the steady state while fully ducked.
+  if (q31_scale == 0 && bytes_per_sample >= 1 && bytes_per_sample <= 4) {
+    std::memset(output_buffer, 0, samples_to_scale * bytes_per_sample);
+    return;
+  }
   // Each case shifts the input sample into Q31 form, then performs a Q31×Q31 high-half multiply
   // (`(int64_t)a * (int64_t)b >> 32`). This is a single instruction on ESP32/other platforms.
   // This yields a Q30 result in int32. That int32 sample is shifted to restore the original bit
