@@ -14,7 +14,8 @@
 
 /* esp-audio-libs PCM convert / mixer benchmark
  *
- * Measures the throughput of pcm_convert::copy_frames and mixer::mix_frames
+ * Measures the throughput of pcm_convert::copy_frames,
+ * pcm_convert::copy_frames_with_gain, and mixer::mix_frames
  * across a matrix of formats: different input/output bit depths (1, 2, 3, 4
  * bytes per sample) and different channel counts (mono <-> stereo up/down mix).
  *
@@ -200,6 +201,29 @@ static const GainScenario GAIN_SCENARIOS[] = {
 };
 static const int NUM_GAIN_SCENARIOS = sizeof(GAIN_SCENARIOS) / sizeof(GAIN_SCENARIOS[0]);
 
+// pcm_convert::copy_frames_with_gain scenarios. `map` is the channel map (nullptr
+// for the copy_frames layout rule). The 0 dB scenario with a consecutive map
+// shows the copy_frames fast path; the others run the gain kernels.
+struct ConvertGainScenario {
+  const char *name;
+  uint8_t in_bps;
+  uint8_t in_ch;
+  uint8_t out_bps;
+  uint8_t out_ch;
+  const uint8_t *map;
+  float gain_db;
+};
+
+static const uint8_t MAP_RIGHT[] = {1};
+static const uint8_t MAP_LEFT[] = {0};
+
+static const ConvertGainScenario CONVERT_GAIN_SCENARIOS[] = {
+    {"4b2 -> 2b1 R +24dB", 4, 2, 2, 1, MAP_RIGHT, 24.0f}, {"4b2 -> 2b1 L 0dB", 4, 2, 2, 1, MAP_LEFT, 0.0f},
+    {"4b1 -> 2b1 +24dB", 4, 1, 2, 1, nullptr, 24.0f},     {"2b1 -> 2b1 +24dB", 2, 1, 2, 1, nullptr, 24.0f},
+    {"2b2 -> 2b2 -6dB", 2, 2, 2, 2, nullptr, -6.0f},      {"3b2 -> 3b2 +12dB", 3, 2, 3, 2, nullptr, 12.0f},
+};
+static const int NUM_CONVERT_GAIN_SCENARIOS = sizeof(CONVERT_GAIN_SCENARIOS) / sizeof(CONVERT_GAIN_SCENARIOS[0]);
+
 // ---------------------------------------------------------------------------
 // Benchmark runners
 // ---------------------------------------------------------------------------
@@ -293,6 +317,32 @@ static void run_gain(const GainScenario &s, bool misaligned) {
   log_result("GAIN", s.name, misaligned ? "misaligned" : "aligned", "sample", &st, bytes_per_sample);
 }
 
+static void run_convert_gain(const ConvertGainScenario &s, bool misaligned) {
+  const gain::LinearGain linear_gain = gain::db_to_linear_gain(s.gain_db);
+  size_t off = misaligned ? 1 : 0;
+  const uint8_t *in = g_in_a + off;
+  uint8_t *out = g_out + off;
+
+  for (int w = 0; w < 4; w++) {
+    pcm_convert::copy_frames_with_gain(in, out, s.in_bps, s.in_ch, s.out_bps, s.map, s.out_ch, linear_gain, FRAMES);
+  }
+
+  Stats st;
+  init_stats(&st);
+  for (int sample = 0; sample < SAMPLES; sample++) {
+    int64_t t0 = esp_timer_get_time();
+    for (int b = 0; b < BATCH; b++) {
+      pcm_convert::copy_frames_with_gain(in, out, s.in_bps, s.in_ch, s.out_bps, s.map, s.out_ch, linear_gain, FRAMES);
+    }
+    int64_t dt_us = esp_timer_get_time() - t0;
+    double ns_per_frame = (double)dt_us * 1000.0 / ((double)BATCH * (double)FRAMES);
+    update_stats(&st, ns_per_frame);
+  }
+
+  double bytes_per_frame = (double)s.in_bps * s.in_ch + (double)s.out_bps * s.out_ch;
+  log_result("CGAI", s.name, misaligned ? "misaligned" : "aligned", "frame", &st, bytes_per_frame);
+}
+
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
@@ -347,6 +397,13 @@ extern "C" void app_main(void) {
     for (int i = 0; i < NUM_CONVERT_SCENARIOS; i++) {
       run_convert(CONVERT_SCENARIOS[i], false);
       run_convert(CONVERT_SCENARIOS[i], true);
+    }
+
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "--- pcm_convert::copy_frames_with_gain ---");
+    for (int i = 0; i < NUM_CONVERT_GAIN_SCENARIOS; i++) {
+      run_convert_gain(CONVERT_GAIN_SCENARIOS[i], false);
+      run_convert_gain(CONVERT_GAIN_SCENARIOS[i], true);
     }
 
     ESP_LOGI(TAG, "");

@@ -7,6 +7,10 @@
 #include <stdint.h>
 
 namespace esp_audio_libs {
+namespace gain {
+struct LinearGain;  // gain.h
+}  // namespace gain
+
 namespace pcm_convert {
 
 /// @brief Converts interleaved PCM frames between bit depths and channel counts
@@ -50,6 +54,42 @@ namespace pcm_convert {
 /// @param frames Number of frames to convert. Zero is a no-op.
 void copy_frames(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8_t input_channels, uint8_t output_bps,
                  uint8_t output_channels, uint32_t frames);
+
+/// @brief Like copy_frames(), but picks input channels through a map and applies a gain that may amplify
+///
+/// Output channel `i` of each frame comes from input channel `channel_map[i]`, so channels can be
+/// selected, reordered, or duplicated. A null map uses the copy_frames() layout rule instead.
+///
+/// The gain is applied to the full-precision Q31 sample before it is narrowed to the output width,
+/// so amplifying a quiet signal keeps its low bits. Results beyond full scale saturate rather than
+/// wrap. Narrowing rounds to nearest, as in copy_frames().
+///
+/// The multiply keeps only the high 32 bits of the product, so the gained Q31 sample can be low by
+/// up to 2^(gain.exponent + 1). That is about 2 bits below a 32-bit input's resolution and far below
+/// that of 24-bit or narrower sources. Results stay within 1 LSB of exact rounding for 16-bit output
+/// up to an exponent of 15 (about +90 dB) and for 24-bit output up to 7 (about +42 dB).
+///
+/// A unity gain whose map selects consecutive input channels runs copy_frames() itself, so its
+/// output matches copy_frames() exactly. A silent gain writes zeros.
+///
+/// Sample format, alignment, and size limits follow copy_frames(). The buffers must not overlap,
+/// except that `output` may exactly alias `input` when the map is the identity (`channel_map[i] == i`,
+/// or a null map), the channel counts match, and `output_bps <= input_bps`. Any other exactly-aliased
+/// call returns without touching the buffer.
+///
+/// @param input Source buffer of interleaved samples.
+/// @param output Destination buffer. See above for the one supported form of aliasing.
+/// @param input_bps Source sample width in bytes: 1, 2, 3, or 4. Other values are a no-op.
+/// @param input_channels Number of source channels (must be >= 1).
+/// @param output_bps Destination sample width in bytes: 1, 2, 3, or 4. Other values are a no-op.
+/// @param channel_map `output_channels` input channel indices, or nullptr. An index of
+/// `input_channels` or more makes the call a no-op.
+/// @param output_channels Number of destination channels (must be >= 1).
+/// @param gain Gain to apply; see gain::db_to_linear_gain(). An exponent above 30 is a no-op.
+/// @param frames Number of frames to convert. Zero is a no-op.
+void copy_frames_with_gain(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8_t input_channels,
+                           uint8_t output_bps, const uint8_t *channel_map, uint8_t output_channels,
+                           const gain::LinearGain &gain, uint32_t frames);
 
 }  // namespace pcm_convert
 }  // namespace esp_audio_libs

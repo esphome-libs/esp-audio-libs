@@ -18,6 +18,24 @@ int32_t db_to_q31(float db);
 /// 0 is unity; 173 and above are silence. Results are exact points on GainRamp's 1 dB grid.
 int32_t db_reduction_to_q31(uint8_t db);
 
+/// @brief A gain that can amplify or attenuate, in the integer form pcm_convert::copy_frames_with_gain() applies.
+///
+/// The linear gain is mantissa_q31 / 2^31 * 2^exponent. Below unity the exponent is 0. At or above
+/// unity the mantissa is in [2^30, 2^31) and the exponent is in [1, 30]. Build one with
+/// db_to_linear_gain() when the level changes, not for every block, since the conversion uses floats.
+struct LinearGain {
+  int32_t mantissa_q31{INT32_C(1) << 30};
+  uint8_t exponent{1};
+
+  bool is_unity() const { return this->mantissa_q31 == (INT32_C(1) << 30) && this->exponent == 1; }
+  bool is_silent() const { return this->mantissa_q31 == 0; }
+};
+
+/// @brief Converts a signed gain in dB (0 is unity) to a LinearGain.
+///
+/// Positive dB amplifies. Gains above +180 dB clamp to +180 dB. Very negative dB and NaN return silence.
+LinearGain db_to_linear_gain(float db);
+
 /// @brief Scales each sample by a Q31 factor in [0, INT32_MAX]. Cannot amplify.
 ///
 /// Samples are signed PCM, little-endian, interleaved; 8-bit is int8, not WAV-style uint8.

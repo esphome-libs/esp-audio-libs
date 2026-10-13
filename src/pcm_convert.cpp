@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "compiler.h"
+#include "gain.h"
 #include "q31_utils.h"
 
 namespace esp_audio_libs {
@@ -300,6 +301,127 @@ inline uintptr_t alignment_mask(uint8_t bps) {
   return 0;
 }
 
+// Rounding term that narrows a Q31 sample to OutputBps bytes by rounding to nearest; 0 for 32-bit.
+constexpr int32_t rounding_term(size_t output_bps) {
+  return output_bps < 4 ? INT32_C(1) << ((4 - output_bps) * 8 - 1) : 0;
+}
+
+// Applies a gain::LinearGain to Q31 samples and adds the output width's rounding term.
+//
+// The Q31 x Q31 high-half multiply (one MULSH on Xtensa, MULH on RISC-V) leaves the result scaled
+// down by 2^shift, and multiplying by `scale` = 2^shift restores it. A multiply is used rather than
+// a variable shift, which on Xtensa would reload the shift amount register for every sample; the
+// scale comes in precomputed so the compiler cannot turn the multiply back into that shift. The
+// product is clamped first so the restore cannot overflow: `low` scales back to exactly INT32_MIN,
+// and any product above `high` rounds to positive full scale whatever its low bits, so it selects
+// INT32_MAX. `high` leaves room for the rounding term, so the add cannot overflow either.
+struct GainStep {
+  GainStep(int32_t mantissa, uint8_t shift, uint32_t scale, int32_t term)
+      : mantissa(mantissa), low(INT32_MIN >> shift), high((INT32_MAX - term) >> shift), scale(scale), term(term) {}
+
+  int32_t apply(int32_t sample) const {
+    const int32_t product = static_cast<int32_t>((static_cast<int64_t>(sample) * this->mantissa) >> 32);
+    const uint32_t restored =
+        static_cast<uint32_t>(std::max(product, this->low)) * this->scale + static_cast<uint32_t>(this->term);
+    return product > this->high ? INT32_MAX : static_cast<int32_t>(restored);
+  }
+
+  int32_t mantissa;
+  int32_t low;
+  int32_t high;
+  uint32_t scale;
+  int32_t term;
+};
+
+// Input channel that feeds output channel `out_ch`: the map entry, or the copy_frames() rule without a map.
+inline uint8_t source_channel(const uint8_t *channel_map, uint8_t out_ch, uint8_t input_channels) {
+  if (channel_map != nullptr) {
+    return channel_map[out_ch];
+  }
+  return std::min<uint8_t>(out_ch, input_channels - 1);
+}
+
+struct GainChannelParams {
+  size_t in_stride;
+  size_t out_stride;
+  int32_t mantissa;
+  uint32_t scale;  ///< 2^shift
+  uint8_t shift;   ///< gain.exponent + 1
+};
+
+// Gains one channel: reads a sample every in_stride bytes and writes one every out_stride bytes.
+// Each width pair is its own function, reached through GAIN_CHANNEL_KERNELS, so the loop gets the
+// whole register window to itself. It is not unrolled: one sample's strides and gain constants
+// already fill Xtensa's registers, and a second sample in flight spills them to the stack.
+template<size_t InputBps, size_t OutputBps>
+EAL_HOT void gain_channel(const uint8_t *in, uint8_t *out, uint32_t frames, const GainChannelParams &params) {
+  // Copied to locals: the output is a uint8_t buffer, which may alias anything, so values read
+  // through `params` would be reloaded after every store.
+  const size_t in_stride = params.in_stride;
+  const size_t out_stride = params.out_stride;
+  const GainStep step(params.mantissa, params.shift, params.scale, rounding_term(OutputBps));
+
+  for (uint32_t frame = 0; frame < frames; ++frame) {
+    fast_pack_q31<OutputBps>(step.apply(fast_unpack_to_q31<InputBps>(in)), out);
+    in += in_stride;
+    out += out_stride;
+  }
+}
+
+using GainChannelKernel = void (*)(const uint8_t *in, uint8_t *out, uint32_t frames, const GainChannelParams &params);
+
+// Aligned kernels indexed by [input_bps - 2][output_bps - 2]. 8-bit audio is rare, so 1-byte widths
+// use the byte-wise loop below instead of seven more kernels.
+const GainChannelKernel GAIN_CHANNEL_KERNELS[3][3] = {
+    {gain_channel<2, 2>, gain_channel<2, 3>, gain_channel<2, 4>},
+    {gain_channel<3, 2>, gain_channel<3, 3>, gain_channel<3, 4>},
+    {gain_channel<4, 2>, gain_channel<4, 3>, gain_channel<4, 4>},
+};
+
+inline int32_t unpack_any_width(const uint8_t *data, uint8_t bps) {
+  switch (bps) {
+    case 1:
+      return unpack_to_q31<1>(data);
+    case 2:
+      return unpack_to_q31<2>(data);
+    case 3:
+      return unpack_to_q31<3>(data);
+    default:
+      return unpack_to_q31<4>(data);
+  }
+}
+
+inline void pack_any_width(int32_t sample, uint8_t *data, uint8_t bps) {
+  switch (bps) {
+    case 1:
+      pack_q31<1>(sample, data);
+      break;
+    case 2:
+      pack_q31<2>(sample, data);
+      break;
+    case 3:
+      pack_q31<3>(sample, data);
+      break;
+    default:
+      pack_q31<4>(sample, data);
+      break;
+  }
+}
+
+// Byte-wise gain loop for misaligned buffers and 1-byte widths. It switches on the widths per sample
+// rather than adding more kernels, since audio buffers are almost always aligned and wider than 8 bits.
+void gain_channel_bytewise(const uint8_t *in, uint8_t *out, uint8_t input_bps, uint8_t output_bps, uint32_t frames,
+                           const GainChannelParams &params) {
+  const size_t in_stride = params.in_stride;
+  const size_t out_stride = params.out_stride;
+  const GainStep step(params.mantissa, params.shift, params.scale, rounding_term(output_bps));
+  for (uint32_t frame = 0; frame < frames; ++frame) {
+    pack_any_width(step.apply(unpack_any_width(in, input_bps)), out, output_bps);
+    in += in_stride;
+    out += out_stride;
+  }
+}
+
 }  // namespace
 
 void copy_frames(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8_t input_channels, uint8_t output_bps,
@@ -366,6 +488,77 @@ void copy_frames(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8
     copy_frames_dispatch_input<true>(input, output, input_bps, output_bps, input_channels, output_channels, frames);
   } else {
     copy_frames_dispatch_input<false>(input, output, input_bps, output_bps, input_channels, output_channels, frames);
+  }
+}
+
+void copy_frames_with_gain(const uint8_t *input, uint8_t *output, uint8_t input_bps, uint8_t input_channels,
+                           uint8_t output_bps, const uint8_t *channel_map, uint8_t output_channels,
+                           const gain::LinearGain &gain, uint32_t frames) {
+  if (frames == 0 || input_channels == 0 || output_channels == 0 || input_bps < 1 || input_bps > 4 ||
+      output_bps < 1 || output_bps > 4 || gain.exponent > 30) {
+    return;
+  }
+
+  // Without a map, the copy_frames() rule is always a run of consecutive channels from channel 0.
+  bool identity = input_channels == output_channels;
+  bool consecutive = true;
+  if (channel_map != nullptr) {
+    for (uint8_t i = 0; i < output_channels; ++i) {
+      if (channel_map[i] >= input_channels) {
+        return;
+      }
+      identity = identity && channel_map[i] == i;
+      consecutive = consecutive && channel_map[i] == channel_map[0] + i;
+    }
+  }
+
+  // Same in-place rule as copy_frames(): only an identity layout that does not widen is a forward
+  // pass whose writes never overtake the unread input.
+  if (input == output && !(identity && output_bps <= input_bps)) {
+    return;
+  }
+
+  if (gain.is_silent()) {
+    std::memset(output, 0, static_cast<size_t>(frames) * output_channels * output_bps);
+    return;
+  }
+
+  if (gain.is_unity() && consecutive) {
+    // Offsetting the input by the first mapped channel turns a consecutive run into copy_frames()'s
+    // "first N channels" layout, since its frame stride still comes from input_channels.
+    const size_t first_channel = channel_map != nullptr ? channel_map[0] : 0;
+    copy_frames(input + first_channel * input_bps, output, input_bps, input_channels, output_bps, output_channels,
+                frames);
+    return;
+  }
+
+  // With an identity layout every sample is independent, so treat the buffers as one flat channel.
+  if (identity) {
+    frames *= input_channels;
+    input_channels = 1;
+    output_channels = 1;
+    channel_map = nullptr;
+  }
+
+  GainChannelParams params;
+  params.in_stride = static_cast<size_t>(input_channels) * input_bps;
+  params.out_stride = static_cast<size_t>(output_channels) * output_bps;
+  params.mantissa = gain.mantissa_q31;
+  params.shift = gain.exponent + 1;
+  params.scale = UINT32_C(1) << params.shift;
+
+  const bool aligned = (reinterpret_cast<uintptr_t>(input) & alignment_mask(input_bps)) == 0 &&
+                       (reinterpret_cast<uintptr_t>(output) & alignment_mask(output_bps)) == 0;
+  const GainChannelKernel kernel =
+      aligned && input_bps >= 2 && output_bps >= 2 ? GAIN_CHANNEL_KERNELS[input_bps - 2][output_bps - 2] : nullptr;
+  for (uint8_t out_ch = 0; out_ch < output_channels; ++out_ch) {
+    const uint8_t *in = input + source_channel(channel_map, out_ch, input_channels) * input_bps;
+    uint8_t *out = output + out_ch * output_bps;
+    if (kernel != nullptr) {
+      kernel(in, out, frames, params);
+    } else {
+      gain_channel_bytewise(in, out, input_bps, output_bps, frames, params);
+    }
   }
 }
 
