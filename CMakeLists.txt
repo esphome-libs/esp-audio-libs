@@ -33,7 +33,7 @@ if(ESP_PLATFORM)
   return()
 endif()
 
-project(esp-audio-libs VERSION 4.0.1)
+project(esp-audio-libs VERSION 4.1.0)
 
 # Standalone build configuration
 add_library(esp-audio-libs STATIC ${srcs})
