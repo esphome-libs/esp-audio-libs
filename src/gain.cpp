@@ -38,6 +38,31 @@ int32_t db_reduction_to_q31(uint8_t db) {
   return factor;
 }
 
+LinearGain db_to_linear_gain(float db) {
+  // 10^(180/20) = 1e9 is below 2^30, the largest gain the exponent range holds.
+  constexpr float max_db = 180.0f;
+  LinearGain result;
+  if (std::isnan(db)) {
+    result.mantissa_q31 = 0;
+    result.exponent = 0;
+    return result;
+  }
+  const float linear = std::pow(10.0f, std::min(db, max_db) / 20.0f);
+  int exponent = 0;
+  const float mantissa = std::frexp(linear, &exponent);  // linear = mantissa * 2^exponent, mantissa in [0.5, 1)
+  if (exponent <= 0) {
+    // Below unity: store the gain itself as Q31, like db_to_q31().
+    const float scaled = std::round(linear * 2147483648.0f);  // 2^31
+    result.mantissa_q31 = scaled >= 2147483648.0f ? INT32_MAX : static_cast<int32_t>(scaled);
+    result.exponent = 0;
+    return result;
+  }
+  // A float mantissa below 1 has at most 24 bits, so mantissa * 2^31 is exact and stays below 2^31.
+  result.mantissa_q31 = static_cast<int32_t>(mantissa * 2147483648.0f);
+  result.exponent = static_cast<uint8_t>(exponent);
+  return result;
+}
+
 void apply(const uint8_t *audio_samples, uint8_t *output_buffer, int32_t q31_scale, size_t samples_to_scale,
            size_t bytes_per_sample) {
   // Silence at every bit depth (8 bit is int8), and the steady state while fully ducked.

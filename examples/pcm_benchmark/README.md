@@ -1,6 +1,6 @@
 # PCM Convert / Mixer / Gain Benchmark
 
-Benchmarks `pcm_convert::copy_frames`, `mixer::mix_frames`, and `gain::apply` across a matrix of formats: different input and output bit depths (1, 2, 3, 4 bytes per sample) and, for convert and mix, different channel counts (mono and stereo, including up-mix and down-mix). The gain pass adds in-place and out-of-place variants per bit depth. The input is synthetic PCM generated at runtime, so this is a pure CPU throughput test of the kernels with no embedded audio asset.
+Benchmarks `pcm_convert::copy_frames`, `pcm_convert::copy_frames_with_gain`, `mixer::mix_frames`, and `gain::apply` across a matrix of formats: different input and output bit depths (1, 2, 3, 4 bytes per sample) and, for convert and mix, different channel counts (mono and stereo, including up-mix and down-mix). The gain pass adds in-place and out-of-place variants per bit depth. The convert-with-gain pass covers microphone-style layouts, such as picking one channel of a 32-bit stereo stream and amplifying it to 16-bit mono. The input is synthetic PCM generated at runtime, so this is a pure CPU throughput test of the kernels with no embedded audio asset.
 
 ## Building and Flashing
 
